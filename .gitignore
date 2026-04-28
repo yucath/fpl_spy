@@ -1,2 +1,50 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
 venv/
+.venv/
+myenv/
+
+# OS
 .DS_Store
+
+# Secrets & credentials
+.env
+*.env
+!.env.example
+facebook_cookies.pkl
+*.pkl
+
+# Browser profile (Selenium)
+chrome_user_data/
+
+# Generated runtime data
+player_data/
+league_data/
+plots/
+league_analysis_gw*.txt
+league_analysis_gw*.pdf
+message.txt
+
+# Logs
+*.log
+
+# Selenium debug screenshots
+login_*.png
+login_page.png
+login_failure.png
+login_error.png
+after_email.png
+message_error.png
+message_error_page.html
+error_screenshot.png
+1_initial_page.png
+2_after_email_entry.png
+3_after_continue.png
+4_after_password.png
+5_after_login_click.png
+
+# Installers / binaries
+*.deb
+*.deb.1
