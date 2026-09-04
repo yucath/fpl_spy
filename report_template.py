@@ -1117,9 +1117,16 @@ body {{
 /* ── Main two-column ── */
 .main-area {{
   display: grid; grid-template-columns: 1fr 285px;
-  gap: 0; margin-bottom: 16px;
+  gap: 0; margin-bottom: 16px; align-items: start;
+  position: relative;
 }}
-.lead-col {{ padding-right: 24px; border-right: 1px solid {RULE}; }}
+.main-area::after {{
+  content: ''; position: absolute;
+  top: 0; bottom: 0; left: calc(100% - 285px - 0px);
+  width: 1px; background: {RULE};
+  pointer-events: none;
+}}
+.lead-col {{ padding-right: 24px; }}
 .sidebar {{ padding-left: 18px; }}
 
 /* ── Lead article ── */
