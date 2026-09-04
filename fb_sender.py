@@ -41,19 +41,26 @@ def read_txt(filepath):
         return None
 
 
-def send_message(thread_id):
-    """Send message to a Facebook thread"""
+def send_message(thread_id, text_only: bool = False):
+    """Send message (and optionally the newspaper PNG) to a Facebook thread.
+
+    text_only=True sends just the standings text without attaching the infographic.
+    Used for daily check-in updates on non-fixture days.
+    """
     fb = init_facebook()
     if not fb:
         print("Failed to initialize Facebook manager")
         return False
-    
+
     try:
-        # Read the message and ensure it's a single string
         message_txt = read_txt(os.path.join(current_dir, 'message.txt'))
         if not message_txt:
             print("No message content found")
             return False
+
+        if text_only:
+            success = fb.send_message(thread_id=thread_id, message=message_txt)
+            return success
 
         # Attach the newest infographic PNG (report_gw*.png). The old pipeline
         # attached a PDF from plots/; we now post the single tall image.
@@ -67,7 +74,6 @@ def send_message(thread_id):
             return False
         image_path = max(report_pngs, key=os.path.getmtime)
 
-        # Send as a single message with the infographic attached
         success = fb.send_message(
             thread_id=thread_id,
             message=message_txt,
@@ -84,6 +90,8 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Send messages to Facebook thread')
     parser.add_argument('--thread', type=str, required=False, help='Facebook thread ID')
+    parser.add_argument('--text-only', action='store_true',
+                        help='Send text message only, no infographic PNG')
     args = parser.parse_args()
     # FB Messenger thread to post to. NOTE: FANTASY_GROUP_ID now holds the FPL
     # league id (used for analysis), NOT a Facebook thread. Set FB_THREAD_ID to
@@ -101,7 +109,7 @@ def main():
     )
     
     try:
-        success = send_message(args.thread)
+        success = send_message(args.thread, text_only=args.text_only)
         if success:
             print("Successfully sent message")
             logging.info("Successfully sent message")

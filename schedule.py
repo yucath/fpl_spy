@@ -98,19 +98,27 @@ def get_current_gw_info():
     return gw_id, status, schedule
 
 
-def run_analysis(gameweek: int, is_final: bool = False) -> bool:
-    """Run main_new.py then fb_sender.py. Returns True on success."""
+def run_analysis(gameweek: int, is_final: bool = False, text_only: bool = False) -> bool:
+    """Run main_new.py then fb_sender.py. Returns True on success.
+
+    text_only=True sends just the standings text without the infographic PNG.
+    Used for daily 9pm check-in updates on non-fixture days.
+    """
     script_path = Path(__file__).parent / "main_new.py"
     cmd = [sys.executable, str(script_path), "--gw", str(gameweek)]
     if is_final:
         cmd.append("--final")
 
-    print(f"[{now_pst():%H:%M}] Running analysis GW{gameweek} {'(FINAL)' if is_final else '(daily)'} ...")
+    label = "FINAL" if is_final else ("daily text" if text_only else "post-matchday")
+    print(f"[{now_pst():%H:%M}] Running analysis GW{gameweek} ({label}) ...")
     try:
         subprocess.run(cmd, check=True)
         print(f"[{now_pst():%H:%M}] Analysis done. Sending to Facebook...")
         fb_path = Path(__file__).parent / "fb_sender.py"
-        subprocess.run([sys.executable, str(fb_path)], check=True)
+        fb_cmd = [sys.executable, str(fb_path)]
+        if text_only:
+            fb_cmd.append("--text-only")
+        subprocess.run(fb_cmd, check=True)
         print(f"[{now_pst():%H:%M}] Facebook send done.")
         return True
     except subprocess.CalledProcessError as e:
@@ -121,7 +129,7 @@ def run_analysis(gameweek: int, is_final: bool = False) -> bool:
 def main():
     print("=" * 60)
     print("FPL Spy Scheduler — starting up")
-    print("Will post after each game-day + a FINAL post at GW end.")
+    print("Posts after each game-day (text only) + newspaper at GW end.")
     print("Exits cleanly only after GW38 final post.")
     print("=" * 60)
 
@@ -159,13 +167,12 @@ def main():
                     break
 
             if next_analysis is None:
-                # All analysis windows for this GW have passed
                 print("All analysis windows for this GW have passed. Waiting for GW to roll over...")
                 time_module.sleep(MAX_SLEEP)
                 continue
 
             wait_secs = (next_analysis - current_time).total_seconds()
-            print(f"Next {'FINAL ' if next_is_final else ''}analysis: {fmt(next_analysis)} "
+            print(f"Next {'FINAL ' if next_is_final else ''}post: {fmt(next_analysis)} "
                   f"({wait_secs/60:.0f} min from now)")
 
             if wait_secs > MIN_SLEEP:
@@ -174,8 +181,9 @@ def main():
                 time_module.sleep(sleep_for)
                 continue
 
-            # Time to run
-            success = run_analysis(gw_id, next_is_final)
+            # Non-final game-days: send standings text only (no newspaper PNG).
+            # Final game-day: send full newspaper report with PNG.
+            success = run_analysis(gw_id, is_final=next_is_final, text_only=not next_is_final)
             if success and next_is_final and schedule["is_last_gw"]:
                 print("GW38 FINAL done. Season complete. Exiting.")
                 sys.exit(0)
