@@ -22,6 +22,11 @@ chrome_user_data/
 # Manager photos (private, not committed)
 photos/
 
+# FB scraper and test outputs (not core functionality)
+fb_photo_scraper.py
+newspaper_test.html
+*_test.html
+
 # Generated runtime data
 player_data/
 league_data/
