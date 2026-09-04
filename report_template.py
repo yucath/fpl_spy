@@ -338,9 +338,12 @@ def _hero(payload: dict, managers: List[dict]) -> str:
     gw = esc(str(payload.get("meta", {}).get("gameweek", "")))
     return f"""
 <div class="hero-placeholder">
-  <div class="hp-week">GAMEWEEK {gw} WINNER</div>
-  <div class="hp-name">{name}</div>
-  <div class="hp-pts">{pts} points</div>
+  <div style="flex:1">
+    <div class="hp-week">GAMEWEEK {gw} WINNER</div>
+    <div class="hp-name">{name}</div>
+    <div class="hp-pts">{pts} points</div>
+  </div>
+  <div style="font-family:'Playfair Display',Georgia,serif;font-size:56px;font-weight:900;color:#8b0000;line-height:1;opacity:0.85">{pts}</div>
 </div>
 <div class="img-caption">Illustration: FPL Spy Analytics Desk &middot; Season 2025/26</div>"""
 
@@ -371,7 +374,6 @@ def _lead_article(narrative: str, managers: List[dict]) -> str:
             rest = esc(p[1:]) if len(p) > 1 else ""
             parts.append(
                 f'<p class="article-para first-para">'
-                f'<span class="dateline">PULLMAN, W.A. &mdash;</span>&nbsp;'
                 f'<span class="drop">{first_char}</span>{rest}</p>'
             )
         else:
@@ -393,7 +395,6 @@ def _lead_article(narrative: str, managers: List[dict]) -> str:
   <div class="byline-rule"></div>
   <div class="article-body">
     {''.join(parts)}
-    <p class="continued">Continued on page 2 &#8594;</p>
   </div>
 </div>"""
 
@@ -730,7 +731,7 @@ body {{
   font-size: 15px; line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }}
-.page {{ padding: 0 40px 48px; }}
+.page {{ padding: 0 32px 32px; }}
 
 /* ── Edition bar ── */
 .edition-bar {{
@@ -773,7 +774,7 @@ body {{
   font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase;
   color: {MUTED}; padding: 6px 0;
   border-top: 2px solid {INK}; border-bottom: 1px solid {RULE};
-  margin-bottom: 22px;
+  margin-bottom: 14px;
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 .section-pill {{
@@ -788,10 +789,10 @@ body {{
 /* ── Main two-column ── */
 .main-area {{
   display: grid; grid-template-columns: 1fr 290px;
-  gap: 0; margin-bottom: 24px;
+  gap: 0; margin-bottom: 16px;
 }}
-.lead-col {{ padding-right: 28px; border-right: 1px solid {RULE}; }}
-.sidebar {{ padding-left: 22px; }}
+.lead-col {{ padding-right: 24px; border-right: 1px solid {RULE}; }}
+.sidebar {{ padding-left: 18px; }}
 
 /* ── Lead article ── */
 .section-flag {{
@@ -816,9 +817,9 @@ body {{
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 .byline-sep {{ margin: 0 6px; color: {RULE}; }}
-.byline-rule {{ height: 1px; background: {RULE}; margin-bottom: 14px; }}
+.byline-rule {{ height: 1px; background: {RULE}; margin-bottom: 8px; }}
 .article-body {{
-  column-count: 2; column-gap: 24px;
+  column-count: 2; column-gap: 18px;
   column-rule: 1px solid {RULE};
 }}
 .article-para {{
@@ -846,19 +847,19 @@ body {{
 }}
 .pull-quote {{
   border-top: 2px solid {ACCENT}; border-bottom: 2px solid {ACCENT};
-  padding: 10px 8px; margin: 16px 0;
+  padding: 8px 6px; margin: 10px 0;
   text-align: center; break-inside: avoid;
   column-span: all; background: {PAPER};
 }}
 .pq-open, .pq-close {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 44px; line-height: 0.7; color: {HEADLINE};
+  font-size: 34px; line-height: 0.7; color: {HEADLINE};
   display: block;
 }}
 .pq-close {{ text-align: right; }}
 .pq-text {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 19px; font-style: italic; color: {INK};
+  font-size: 16px; font-style: italic; color: {INK};
   line-height: 1.42; margin: 4px 0;
 }}
 
@@ -866,21 +867,22 @@ body {{
 .hero-img-wrap {{ margin: 18px 0 4px; border: 1px solid {RULE}; }}
 .hero-img {{ display: block; width: 100%; max-height: 250px; object-fit: cover; }}
 .hero-placeholder {{
-  background: {PAPER}; border: 1px solid {RULE};
-  border-left: 5px solid {HEADLINE}; padding: 30px 24px;
-  margin: 18px 0 4px; text-align: center;
+  background: linear-gradient(135deg, #1a1a1a 0%, #3a0000 100%);
+  border-left: 5px solid {ACCENT};
+  padding: 18px 22px; margin: 12px 0 4px;
+  display: flex; align-items: center; gap: 20px;
 }}
 .hp-week {{
-  font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
-  color: {MUTED}; margin-bottom: 8px;
+  font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+  color: {ACCENT}; margin-bottom: 4px;
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 .hp-name {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 34px; font-weight: 900; color: {HEADLINE}; line-height: 1.1;
+  font-size: 26px; font-weight: 900; color: #f7f4ef; line-height: 1.1;
 }}
 .hp-pts {{
-  font-size: 17px; color: {INK2}; font-style: italic; margin-top: 6px;
+  font-size: 14px; color: #c0c0c0; font-style: italic; margin-top: 3px;
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 .img-caption {{
@@ -890,12 +892,13 @@ body {{
 }}
 
 /* ── Sidebar ── */
-.sb-section {{ margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid {RULE}; }}
+.sb-section {{ margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid {RULE}; }}
 .sb-section:last-child {{ border-bottom: none; }}
 .sb-head {{
   font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
-  font-weight: 700; color: {MUTED}; border-bottom: 2px solid {INK};
-  padding-bottom: 5px; margin-bottom: 10px;
+  font-weight: 700; color: {MUTED};
+  border-left: 3px solid {HEADLINE}; padding-left: 6px;
+  margin-bottom: 8px;
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 
@@ -933,11 +936,11 @@ body {{
 .cap-list {{ display: flex; flex-direction: column; gap: 0; }}
 .cap-row {{
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 0; border-bottom: 1px solid {RULE};
+  padding: 4px 0; border-bottom: 1px solid {RULE};
 }}
 .cap-row:last-child {{ border-bottom: none; }}
 .mgr-avatar, .mgr-initial {{
-  width: 30px; height: 30px; border-radius: 50%;
+  width: 26px; height: 26px; border-radius: 50%;
   object-fit: cover; flex-shrink: 0;
 }}
 .mgr-initial {{
@@ -949,7 +952,7 @@ body {{
 .cap-mgr {{ font-size: 11.5px; font-weight: 700; color: {INK}; font-family: 'Source Serif 4', Georgia, serif; }}
 .cap-player {{ font-size: 10.5px; color: {MUTED}; font-style: italic; font-family: 'Source Serif 4', Georgia, serif; }}
 .cap-pts {{
-  font-size: 14px; font-weight: 800; text-align: right; min-width: 42px;
+  font-size: 12px; font-weight: 800; text-align: right; min-width: 38px;
   font-family: 'Courier New', monospace;
 }}
 .cap-good {{ color: {UP}; }}
@@ -958,25 +961,26 @@ body {{
 
 /* ── Section dividers ── */
 .section-divider {{
-  display: flex; align-items: center; gap: 14px; margin: 20px 0 16px;
+  display: flex; align-items: center; gap: 14px; margin: 14px 0 10px;
 }}
 .div-rule {{ flex: 1; height: 2px; background: {RULE}; }}
 .div-label {{
   font-size: 11px; font-weight: 700; letter-spacing: 2.5px;
-  text-transform: uppercase; color: {INK2}; white-space: nowrap;
+  text-transform: uppercase; color: {HEADLINE}; white-space: nowrap;
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 .section-divider-plain {{ height: 3px; background: {INK}; margin: 24px 0 20px; }}
 
 /* ── Stats strip ── */
-.stats-section {{ margin-bottom: 24px; }}
+.stats-section {{ margin-bottom: 16px; }}
 .stats-grid {{
   display: grid; grid-template-columns: repeat(4, 1fr);
-  border: 1px solid {RULE};
+  border: 1px solid {RULE}; border-top: 3px solid {HEADLINE};
+  background: {PAPER};
 }}
-.stat-box {{ padding: 18px 16px; border-right: 1px solid {RULE}; text-align: center; }}
+.stat-box {{ padding: 12px 14px; border-right: 1px solid {RULE}; text-align: center; }}
 .stat-box:last-child {{ border-right: none; }}
-.stat-emoji {{ font-size: 22px; margin-bottom: 5px; }}
+.stat-emoji {{ font-size: 18px; margin-bottom: 3px; }}
 .stat-kicker {{
   font-size: 9px; letter-spacing: 1.5px; color: {MUTED}; text-transform: uppercase;
   font-weight: 700; margin-bottom: 5px; font-family: 'Source Serif 4', Georgia, serif;
@@ -984,18 +988,18 @@ body {{
 .stat-name {{ font-size: 13px; font-weight: 700; color: {INK}; margin-bottom: 3px; font-family: 'Source Serif 4', Georgia, serif; }}
 .stat-value {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 24px; font-weight: 900; color: {HEADLINE}; margin-bottom: 2px;
+  font-size: 21px; font-weight: 900; color: {HEADLINE}; margin-bottom: 2px;
 }}
 .stat-sub {{ font-size: 10px; color: {MUTED}; font-style: italic; font-family: 'Source Serif 4', Georgia, serif; }}
 
 /* ── Manager dossiers ── */
-.dossier-section {{ margin-bottom: 28px; }}
-.mc-grid {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }}
+.dossier-section {{ margin-bottom: 20px; }}
+.mc-grid {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }}
 .mc {{
   background: {BG}; border: 1px solid {RULE};
-  padding: 12px 10px 10px; font-family: 'Source Serif 4', Georgia, serif;
+  padding: 9px 8px 8px; font-family: 'Source Serif 4', Georgia, serif;
 }}
-.mc-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
+.mc-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }}
 .mc-avatar, .mc-initial {{
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover;
 }}
@@ -1020,13 +1024,14 @@ body {{
 .mcs-v {{ font-weight: 700; padding: 3px 4px; text-align: right; font-family: 'Courier New', monospace; font-size: 10px; }}
 
 /* ── Race chart ── */
-.race-section {{ margin-bottom: 28px; }}
+.race-section {{ margin-bottom: 20px; }}
 .chart-wrap {{ border: 1px solid {RULE}; overflow-x: auto; background: {BG}; }}
 
 /* ── Intel ── */
-.intel-section {{ margin-bottom: 28px; }}
+.intel-section {{ margin-bottom: 20px; }}
 .intel-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid {RULE}; }}
-.intel-panel {{ padding: 16px 14px; border-right: 1px solid {RULE}; font-family: 'Source Serif 4', Georgia, serif; }}
+.intel-panel {{ padding: 12px 12px; border-right: 1px solid {RULE}; font-family: 'Source Serif 4', Georgia, serif; }}
+.intel-panel:first-child {{ background: {TALT}; }}
 .intel-panel:last-child {{ border-right: none; }}
 .intel-head {{
   font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
