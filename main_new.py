@@ -3917,41 +3917,66 @@ def main(args):
 
         sections.append(header + "\n\n" + "\n".join(rows))
     else:
-        # Live standings — show captain status so people know who's still to play
+        # Live standings — rich per-manager row with captain pts, players left, chips
         rows = []
         for i, team in enumerate(gw_standings):
             medal = MEDALS[i] if i < 3 else f"#{i+1}"
             delta = team['GW Points'] - gw_avg_pts
             delta_str = f" (+{delta:.0f})" if delta >= 0 else f" ({delta:.0f})"
-            # Find captain and their status
+
             m_data = next((m for m in mini_league_data['standings']['results']
                            if m['entry_name'] == team['Team Name']), {})
             gw_pick_data = m_data.get('gameweek_data', {}).get(str(gameweek), {})
             picks = gw_pick_data.get('picks', [])
+            starters = [p for p in picks if p.get('multiplier', 0) > 0]
+
+            # Captain info
             cap = next((p for p in picks if p.get('is_captain')), None)
             if cap:
                 cap_name = player_id_to_name.get(cap['element'], '?').split()[-1]
-                cap_status = play_status.get(cap['element'], 'upcoming') if play_status else 'unknown'
+                cap_status = (play_status or {}).get(cap['element'], 'upcoming')
+                cap_pts = player_id_to_points.get(cap['element'], 0) * cap.get('multiplier', 2)
                 cap_icon = {'finished': '✓', 'playing': '⚡', 'upcoming': '⏳'}.get(cap_status, '?')
-                cap_str = f" | C:{cap_name}{cap_icon}"
+                if cap_status == 'finished':
+                    cap_str = f" | C:{cap_name} {cap_pts}pts{cap_icon}"
+                elif cap_status == 'playing':
+                    cap_str = f" | C:{cap_name} {cap_pts}pts{cap_icon}"
+                else:
+                    cap_str = f" | C:{cap_name}{cap_icon}"
             else:
                 cap_str = ""
+
+            # Players yet to play / currently playing
+            n_upcoming = sum(1 for p in starters if (play_status or {}).get(p['element']) == 'upcoming')
+            n_live = sum(1 for p in starters if (play_status or {}).get(p['element']) == 'playing')
+            if n_live > 0 and n_upcoming > 0:
+                play_str = f" | {n_live}⚡ {n_upcoming}⏳left"
+            elif n_live > 0:
+                play_str = f" | {n_live}⚡ playing"
+            elif n_upcoming > 0:
+                play_str = f" | {n_upcoming}⏳ to play"
+            else:
+                play_str = ""
+
             chip = gw_pick_data.get('active_chip')
             chip_str = f" {CHIP_EMOJI.get(chip, '🎮')}" if chip else ""
-            rows.append(f"{medal} {team['Team Name']}{chip_str} — {team['GW Points']}pts{delta_str}{cap_str}")
+
+            rows.append(
+                f"{medal} {team['Team Name']}{chip_str} — {team['GW Points']}pts{delta_str}"
+                f"{cap_str}{play_str}"
+            )
 
         _fin = gw_status.get('fixtures_finished', 0)
         _live = gw_status.get('fixtures_in_progress', 0)
         _tot = gw_status.get('total_fixtures', 10)
+        _rem = _tot - _fin - _live
         if _fin == 0 and _live == 0:
-            _status_tag = "not started yet"
-        elif _fin == 0:
-            _status_tag = f"{_live} game(s) in progress"
+            _status_tag = f"0/{_tot} games played"
         elif _live > 0:
-            _status_tag = f"{_fin}/{_tot} done · {_live} live"
+            _status_tag = f"{_fin}/{_tot} done · {_live} live · {_rem} left"
         else:
-            _status_tag = f"{_fin}/{_tot} games done"
-        header = f"🏁 GW{gameweek} LIVE — {_status_tag}"
+            _status_tag = f"{_fin}/{_tot} games done · {_rem} remaining"
+        header = f"🏁 GW{gameweek} — {_status_tag}"
         sections.append(header + "\n" + "\n".join(rows))
 
     # --- Highlights (fun facts) — only show if player has actually played ---

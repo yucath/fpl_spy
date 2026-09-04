@@ -338,8 +338,8 @@ def _masthead(meta: dict) -> str:
       <div class="mast-season">SEASON {season}</div>
     </div>
     <div class="mast-center">
-      <div class="mast-league">{league}</div>
-      <div class="mast-gazette">THE GAZETTE</div>
+      <div class="mast-gazette">{league}</div>
+      <div class="mast-league">THE GAZETTE</div>
     </div>
     <div class="mast-side mast-right">
       <div>{date_str}</div>
@@ -1088,11 +1088,11 @@ body {{
 .mast-center {{ text-align: center; }}
 .mast-league {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 52px; font-weight: 900; letter-spacing: -1.5px;
+  font-size: 64px; font-weight: 900; letter-spacing: -2px;
   line-height: 1; color: {INK}; text-transform: uppercase;
 }}
 .mast-gazette {{
-  font-size: 11px; letter-spacing: 6px; color: {MUTED}; margin-top: 4px;
+  font-size: 10px; letter-spacing: 5px; color: {MUTED}; margin-bottom: 2px;
   text-transform: uppercase; font-family: 'Source Serif 4', Georgia, serif;
 }}
 
