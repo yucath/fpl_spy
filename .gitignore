@@ -24,6 +24,9 @@ photos/
 
 # FB scraper and test outputs (not core functionality)
 fb_photo_scraper.py
+fetch_missing_photos.py
+*_scraper.py
+*_photo*.py
 newspaper_test.html
 *_test.html
 

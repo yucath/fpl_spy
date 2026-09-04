@@ -101,15 +101,68 @@ def _extract_pull_quote(text: str) -> str:
 
 
 def _parse_narrative(narrative: str):
+    """Parse AI narrative into (headline, story_paras, verdicts, teaser).
+
+    Returns (headline, paras, verdicts, teaser) where:
+      - paras: list of story paragraph strings
+      - verdicts: list of (name, text) tuples for per-manager verdicts
+      - teaser: closing teaser line
+    """
+    import re as _re
     lines = [l.strip() for l in narrative.strip().split("\n") if l.strip()]
     if not lines:
-        return "", []
+        return "", [], [], ""
+
+    # Section markers
+    VERDICT_MARKERS = {"MANAGER VERDICTS", "VERDICTS", "MANAGER VERDICT", "PLAYER VERDICTS"}
+    TEASER_MARKERS = {"NEXT WEEK TEASER", "NEXT WEEK", "TEASER", "SUSPENSE CLOSER", "CLOSING"}
+
     raw_head = lines[0]
     if ":" in raw_head[:10]:
         raw_head = raw_head.split(":", 1)[1].strip()
     raw_head = raw_head.rstrip("!")
-    paras = lines[1:]
-    return raw_head, paras
+
+    section = "story"
+    story_paras, verdicts, teaser_lines = [], [], []
+
+    for line in lines[1:]:
+        upper = line.upper().strip(":-–—.")
+        if upper in VERDICT_MARKERS or upper.startswith("MANAGER VERDICT"):
+            section = "verdicts"
+            continue
+        if upper in TEASER_MARKERS or upper.startswith("NEXT WEEK") or upper.startswith("SUSPENSE"):
+            section = "teaser"
+            continue
+
+        if section == "story":
+            story_paras.append(line)
+        elif section == "verdicts":
+            # Match "Name: verdict" or "Name — verdict"
+            m = _re.match(r'^([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)[\s]*[:\-–—]\s*(.+)', line)
+            if m:
+                verdicts.append((m.group(1), m.group(2)))
+            else:
+                # Could be a verdict without the Name: prefix — treat as story paragraph
+                story_paras.append(line)
+        elif section == "teaser":
+            teaser_lines.append(line)
+
+    # If no explicit verdict section found, check for name-prefixed lines in story_paras
+    if not verdicts:
+        remaining_story, found_verdicts = [], []
+        import re as _re2
+        for p in story_paras:
+            m = _re2.match(r'^([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)[\s]*[:\-–—]\s*(.+)', p)
+            if m and len(p) < 200:
+                found_verdicts.append((m.group(1), m.group(2)))
+            else:
+                remaining_story.append(p)
+        if len(found_verdicts) >= 3:
+            story_paras = remaining_story
+            verdicts = found_verdicts
+
+    teaser = " ".join(teaser_lines).strip()
+    return raw_head, story_paras, verdicts, teaser
 
 
 # ── SVG charts ────────────────────────────────────────────────────────────── #
@@ -338,18 +391,17 @@ def _hero(payload: dict, managers: List[dict]) -> str:
     gw = esc(str(payload.get("meta", {}).get("gameweek", "")))
     return f"""
 <div class="hero-placeholder">
+  <div class="hp-score">{pts}</div>
   <div style="flex:1">
-    <div class="hp-week">GAMEWEEK {gw} WINNER</div>
+    <div class="hp-week">Gameweek {gw} Winner</div>
     <div class="hp-name">{name}</div>
-    <div class="hp-pts">{pts} points</div>
+    <div class="hp-pts">{pts} points this week</div>
   </div>
-  <div style="font-family:'Playfair Display',Georgia,serif;font-size:56px;font-weight:900;color:#8b0000;line-height:1;opacity:0.85">{pts}</div>
-</div>
-<div class="img-caption">Illustration: FPL Spy Analytics Desk &middot; Season 2025/26</div>"""
+</div>"""
 
 
 def _lead_article(narrative: str, managers: List[dict]) -> str:
-    headline, paras = _parse_narrative(narrative)
+    headline, paras, verdicts, teaser = _parse_narrative(narrative)
     if not headline:
         headline = (managers[0].get("name", "This Week's Champion") + " Leads the Pack") if managers else "Weekly Report"
     leader = managers[0] if managers else {}
@@ -360,7 +412,7 @@ def _lead_article(narrative: str, managers: List[dict]) -> str:
     deck = (
         f"{esc(leader.get('name',''))} storms to {fnum(leader.get('gw_points'))} points"
         + (f" in Gameweek {last_gw}" if last_gw else "")
-        + ", delivering the highest score as drama unfolds across the Pullman Football Samaj mini-league."
+        + ", delivering the highest score as drama unfolds across the mini-league."
     )
 
     full_body = " ".join(paras)
@@ -386,6 +438,28 @@ def _lead_article(narrative: str, managers: List[dict]) -> str:
 </aside>""")
             parts.append(f'<p class="article-para">{esc(p)}</p>')
 
+    # Manager verdicts grid
+    verdict_html = ""
+    if verdicts:
+        verdict_items = []
+        for name, text in verdicts:
+            verdict_items.append(
+                f'<div class="verdict-item">'
+                f'<span class="verdict-name">{esc(name)}</span>'
+                f'<span class="verdict-text">{esc(text)}</span>'
+                f'</div>'
+            )
+        verdict_html = f"""
+<div class="verdicts-section">
+  <div class="verdicts-label">MANAGER VERDICTS</div>
+  <div class="verdicts-grid">{''.join(verdict_items)}</div>
+</div>"""
+
+    # Teaser
+    teaser_html = ""
+    if teaser:
+        teaser_html = f'<p class="article-teaser">{esc(teaser)}</p>'
+
     return f"""
 <div class="lead-article">
   <span class="section-flag">SPORT</span>
@@ -396,6 +470,8 @@ def _lead_article(narrative: str, managers: List[dict]) -> str:
   <div class="article-body">
     {''.join(parts)}
   </div>
+  {verdict_html}
+  {teaser_html}
 </div>"""
 
 
@@ -724,14 +800,14 @@ def render_report_html(payload: dict) -> str:
 # ── CSS ───────────────────────────────────────────────────────────────────── #
 CSS = f"""
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-html, body {{ background: {BG}; color: {INK}; }}
+html, body {{ background: #f2efe8; color: {INK}; }}
 body {{
   width: 1200px; margin: 0 auto;
   font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
   font-size: 15px; line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }}
-.page {{ padding: 0 32px 32px; }}
+.page {{ padding: 0 32px 32px; background: {BG}; box-shadow: 0 0 40px rgba(0,0,0,0.10); }}
 
 /* ── Edition bar ── */
 .edition-bar {{
@@ -743,11 +819,11 @@ body {{
 
 /* ── Masthead ── */
 .masthead {{ margin-bottom: 0; }}
-.mast-rule-thick {{ height: 5px; background: {INK}; margin: 6px 0; }}
+.mast-rule-thick {{ height: 4px; background: {INK}; margin: 6px 0; }}
 .mast-rule-thin {{ height: 1px; background: {RULE}; margin: 2px 0 0; }}
 .mast-inner {{
-  display: grid; grid-template-columns: 210px 1fr 210px;
-  align-items: center; padding: 12px 0 8px;
+  display: grid; grid-template-columns: 200px 1fr 200px;
+  align-items: center; padding: 10px 0 7px;
 }}
 .mast-side {{
   font-size: 9.5px; letter-spacing: 0.9px; text-transform: uppercase;
@@ -760,11 +836,11 @@ body {{
 .mast-center {{ text-align: center; }}
 .mast-league {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 54px; font-weight: 900; letter-spacing: -1.5px;
+  font-size: 52px; font-weight: 900; letter-spacing: -1.5px;
   line-height: 1; color: {INK}; text-transform: uppercase;
 }}
 .mast-gazette {{
-  font-size: 12px; letter-spacing: 6px; color: {MUTED}; margin-top: 4px;
+  font-size: 11px; letter-spacing: 6px; color: {MUTED}; margin-top: 4px;
   text-transform: uppercase; font-family: 'Source Serif 4', Georgia, serif;
 }}
 
@@ -772,23 +848,23 @@ body {{
 .section-nav {{
   display: flex; align-items: center; gap: 10px;
   font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase;
-  color: {MUTED}; padding: 6px 0;
+  color: {MUTED}; padding: 5px 0;
   border-top: 2px solid {INK}; border-bottom: 1px solid {RULE};
   margin-bottom: 14px;
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 .section-pill {{
-  background: {INK}; color: {BG}; padding: 2px 8px;
+  background: {HEADLINE}; color: {WHITE}; padding: 2px 8px;
   font-size: 9px; letter-spacing: 1.5px; font-weight: 700;
 }}
 .nav-sep {{ color: {RULE}; }}
 .nav-item {{ color: {INK2}; }}
 .nav-final {{ color: {HEADLINE}; font-weight: 700; }}
-.nav-live {{ color: #1a5c1a; font-weight: 700; }}
+.nav-live {{ color: #1a6b1a; font-weight: 700; }}
 
 /* ── Main two-column ── */
 .main-area {{
-  display: grid; grid-template-columns: 1fr 290px;
+  display: grid; grid-template-columns: 1fr 285px;
   gap: 0; margin-bottom: 16px;
 }}
 .lead-col {{ padding-right: 24px; border-right: 1px solid {RULE}; }}
@@ -863,27 +939,62 @@ body {{
   line-height: 1.42; margin: 4px 0;
 }}
 
+/* ── Manager verdicts ── */
+.verdicts-section {{
+  margin: 14px 0 6px; border-top: 2px solid {HEADLINE};
+  padding-top: 8px;
+}}
+.verdicts-label {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 10px; font-weight: 700; letter-spacing: 1.2px;
+  color: {HEADLINE}; text-transform: uppercase; margin-bottom: 7px;
+}}
+.verdicts-grid {{
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 5px 14px;
+}}
+.verdict-item {{
+  font-size: 12.5px; line-height: 1.45; color: {INK};
+  font-family: 'Source Serif 4', Georgia, serif;
+  border-left: 2px solid {RULE}; padding-left: 6px;
+}}
+.verdict-name {{
+  font-weight: 700; color: {HEADLINE}; margin-right: 4px;
+}}
+.verdict-text {{ color: {INK}; }}
+.article-teaser {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 13px; font-style: italic; color: {MUTED};
+  border-top: 1px solid {RULE}; padding-top: 7px; margin-top: 8px;
+  text-align: center;
+}}
+
 /* ── Hero ── */
-.hero-img-wrap {{ margin: 18px 0 4px; border: 1px solid {RULE}; }}
+.hero-img-wrap {{ margin: 14px 0 4px; border: 1px solid {RULE}; }}
 .hero-img {{ display: block; width: 100%; max-height: 250px; object-fit: cover; }}
 .hero-placeholder {{
-  background: linear-gradient(135deg, #1a1a1a 0%, #3a0000 100%);
-  border-left: 5px solid {ACCENT};
-  padding: 18px 22px; margin: 12px 0 4px;
-  display: flex; align-items: center; gap: 20px;
+  background: {BG}; border: 1px solid {RULE};
+  border-left: 4px solid {HEADLINE};
+  padding: 14px 18px; margin: 10px 0 4px;
+  display: flex; align-items: center; gap: 18px;
 }}
 .hp-week {{
   font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
-  color: {ACCENT}; margin-bottom: 4px;
+  color: {HEADLINE}; margin-bottom: 3px;
   font-family: 'Source Serif 4', Georgia, serif;
 }}
 .hp-name {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 26px; font-weight: 900; color: #f7f4ef; line-height: 1.1;
+  font-size: 24px; font-weight: 900; color: {INK}; line-height: 1.1;
 }}
 .hp-pts {{
-  font-size: 14px; color: #c0c0c0; font-style: italic; margin-top: 3px;
+  font-size: 13px; color: {MUTED}; font-style: italic; margin-top: 2px;
   font-family: 'Source Serif 4', Georgia, serif;
+}}
+.hp-score {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 48px; font-weight: 900; color: {HEADLINE};
+  line-height: 1; flex-shrink: 0;
 }}
 .img-caption {{
   font-size: 11px; font-style: italic; color: {MUTED};

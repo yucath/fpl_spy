@@ -3189,10 +3189,19 @@ def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: 
         if is_final:
             status_line = f"GW{gameweek} FINAL — all {total_fixtures} fixtures done."
             task = (
-                f"Write a punchy 200-250 word FINAL match report for GW{gameweek}. "
-                "Crown the winner, roast the bottom, highlight the biggest stories. "
-                "FINAL results — you can be definitive. Make it feel like a WhatsApp message everyone screenshots."
-            )
+                f"Write a FINAL match report for GW{gameweek} — structured EXACTLY as follows:\n\n"
+                "HEADLINE (1 sentence, all-caps, punchy)\n\n"
+                "THE STORY (3-4 paragraphs, ~200 words total): Crown the GW winner, highlight the biggest "
+                "individual storylines (captaincy, transfers, bench disasters), reference the OVERALL league "
+                "standings and who is making a title charge vs who is in freefall. Weave in context from "
+                "previous weeks where relevant — recurring patterns, redemption arcs, serial underperformers.\n\n"
+                "MANAGER VERDICTS (one line per manager, cover ALL managers in the league): "
+                "For each manager write a single sentence — one punch or praise that captures their GW in a "
+                "nutshell. Format exactly as: [FIRST NAME]: [verdict]. Be specific (captain picks, transfers, "
+                "bench pts, position changes). Alternate punches and praises naturally.\n\n"
+                "NEXT WEEK TEASER (1 punchy sentence about what to watch for GW{gw_next}).\n\n"
+                "Total output: 350-450 words. FINAL results — you can be completely definitive."
+            ).replace("{gw_next}", str(gameweek + 1))
         else:
             # Spell out the fixture state in plain English so the AI can't misread it
             if fixtures_finished == 0 and fixtures_in_progress == 0:
@@ -3211,12 +3220,21 @@ def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: 
                 f"STANDINGS ARE PROVISIONAL AND WILL CHANGE."
             )
             task = (
-                f"Write a punchy 200-250 word LIVE match-day update for GW{gameweek}. "
-                f"Be honest about how early/late in the gameweek we are ({fixture_state}). "
-                f"Hype up the current leaders but remind everyone {fixtures_not_started} game(s) are still to kick off. "
-                "Flag managers whose captain/key players are yet to play — they could rocket or crater. "
-                "IMPORTANT: a player showing 0pts may have ALREADY PLAYED and just blanked — check squad play status. "
-                "Build suspense. Do NOT declare winners yet — this is mid-gameweek drama."
+                f"Write a LIVE match-day update for GW{gameweek} — structured EXACTLY as follows:\n\n"
+                "HEADLINE (1 sentence, all-caps, captures the drama so far)\n\n"
+                "THE STORY (3-4 paragraphs, ~200 words): "
+                f"Be honest about how early/late we are ({fixture_state}). "
+                f"Hype current leaders but flag that {fixtures_not_started} game(s) are still to come. "
+                "Flag managers whose captain/key players haven't played yet — they could swing the week dramatically. "
+                "Reference the OVERALL standings: who's been consistent, who's been climbing, who's in crisis. "
+                "IMPORTANT: a player showing 0pts may have ALREADY PLAYED and blanked — check squad play status. "
+                "Build genuine suspense.\n\n"
+                "MANAGER VERDICTS (one line per manager, cover ALL managers in the league): "
+                "For each manager, write a single-sentence verdict on their GW so far. "
+                "Format exactly as: [FIRST NAME]: [verdict]. Flag managers whose big players haven't played yet "
+                "(use 'watch this space' tone). Be specific. Do NOT declare anyone a winner or loser yet.\n\n"
+                "SUSPENSE CLOSER (1 sentence about the biggest question mark heading into the remaining fixtures).\n\n"
+                "Total output: 350-450 words. Do NOT declare final winners — this is mid-gameweek drama."
             )
 
         all_ctx = "\n\n".join(filter(None, [
@@ -3246,7 +3264,7 @@ ABSOLUTE RULES — breaking any of these makes the output worthless:
 4. NET points (after hit deductions) are the official score. If someone took a hit, note it.
 5. No emojis, no markdown (**bold** etc), plain text only, CAPS for emphasis.
 
-TONE: You are the funniest person in a WhatsApp group of football obsessives. Warm roasting, genuine banter, first-name basis. Reference ACTUAL captain picks and real player names. Make every manager feel seen — mention as many as you can. One punchy headline, then the story, then a one-liner teaser for next week."""
+TONE: You are the funniest, most insightful person in a WhatsApp group of football obsessives who've been playing together for years. You know their habits, their recurring disasters, their lucky streaks. Warm roasting and genuine praise in equal measure. First-name basis. Reference ACTUAL captain picks, real player names, actual transfer decisions. Every manager verdict must be SPECIFIC — not generic. No manager should feel ignored."""
 
         logger.info(f"Calling OpenAI API with prompt length: {len(prompt)}")
 
@@ -3254,17 +3272,20 @@ TONE: You are the funniest person in a WhatsApp group of football obsessives. Wa
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": (
-                    "You are the voice of 'Pullman Football Samaj' — a 15-man FPL mini-league group chat. "
-                    "You write like the funniest analyst in the group: sharp, data-driven, genuinely funny, "
-                    "never cruel, always relatable. You know these managers personally. You remember their "
-                    "previous GW disasters and lucky streaks. You celebrate and roast in equal measure. "
-                    f"{'This is the FINAL result — be definitive.' if is_final else f'This is LIVE with {fixtures_remaining} games left — be dramatic and provisional.'} "
-                    "Plain text only. CAPS for emphasis. No emojis. No markdown."
+                    "You are the sharp, funny match correspondent for a tight-knit FPL mini-league group chat. "
+                    "Your job: write reports that feel PERSONAL — like they were written by someone who has "
+                    "watched every single one of these managers suffer and celebrate across the whole season. "
+                    "You are data-driven but never dry. You reward bold calls and skewer costly mistakes with "
+                    "affection, not cruelty. You use league history and context — not just this week's scores — "
+                    "to make each verdict feel earned. "
+                    f"{'This is the FINAL result — be completely definitive and decisive.' if is_final else f'This is a LIVE update with {fixtures_remaining} fixtures remaining — stay dramatic and provisional.'} "
+                    "Structure your output exactly as the task instructs. Plain text only. CAPS for emphasis. "
+                    "No emojis. No markdown formatting."
                 )},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=600,
-            temperature=0.85
+            max_tokens=1000,
+            temperature=0.88
         )
         
         logger.info(f"OpenAI API response received. Choices count: {len(response.choices)}")
