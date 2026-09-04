@@ -781,6 +781,90 @@ def _intel(league: dict) -> str:
 </section>"""
 
 
+def _talking_points(payload: dict, managers: List[dict]) -> str:
+    """Newspaper-style callout boxes for the most interesting GW stories."""
+    highlights = payload.get("highlights") or {}
+    league = payload.get("league") or {}
+    meta = payload.get("meta") or {}
+    gw = meta.get("gameweek", "?")
+    items = []
+
+    # GW winner / top scorer
+    if managers:
+        top = managers[0]
+        items.append(("&#127942;", f"GW{gw} WINNER",
+            f"<b>{esc(top.get('name',''))}</b> scored <b>{fnum(top.get('gw_points'))}</b> pts — "
+            + (f"Bench Boost chip used" if top.get('chip') == 'Bench Boost' else
+               f"captained {esc(top.get('captain','?'))} for {fnum(top.get('captain_points'))} pts")))
+
+    # Biggest climber
+    cb = highlights.get("comeback")
+    if cb:
+        items.append(("&#128200;", "BIGGEST CLIMBER",
+            f"<b>{esc(cb['manager'])}</b> rocketed <b>+{cb['change']}</b> places "
+            f"(#{cb['prev_rank']} → #{cb['current_rank']})"))
+
+    # Biggest faller
+    ch = highlights.get("choke")
+    if ch:
+        items.append(("&#128201;", "BIGGEST FALLER",
+            f"<b>{esc(ch['manager'])}</b> dropped <b>{abs(ch['change'])}</b> places "
+            f"(#{ch['prev_rank']} → #{ch['current_rank']})"))
+
+    # Captain disaster
+    cf = highlights.get("captain_fail")
+    if cf and (cf.get("points") or 0) == 0:
+        items.append(("&#128128;", "CAPTAIN FAIL",
+            f"<b>{esc(cf['manager'])}</b> captained <b>{esc(cf['captain'])}</b> — "
+            f"who blanked with <b>{fnum(cf.get('points',0))} pts</b>. Ouch."))
+    elif cf:
+        items.append(("&#128128;", "CAPTAIN MISS",
+            f"<b>{esc(cf['manager'])}</b> chose <b>{esc(cf['captain'])}</b> for just "
+            f"<b>{fnum(cf.get('points',0))} pts</b>"))
+
+    # Bench hero
+    bh = highlights.get("bench_hero")
+    if bh and (bh.get("points") or 0) >= 8:
+        items.append(("&#129335;", "BENCH CRIME",
+            f"<b>{esc(bh['manager'])}</b> left <b>{esc(bh['player'])}</b> on the bench — "
+            f"who scored <b>{fnum(bh.get('points'))} pts</b>. That one hurts."))
+
+    # Differential hero
+    dh = highlights.get("differential_hero")
+    if dh and (dh.get("points") or 0) >= 10:
+        own_pct = dh.get("ownership_pct") or 0
+        items.append(("&#128161;", "DIFFERENTIAL KING",
+            f"<b>{esc(dh['manager'])}</b> played <b>{esc(dh['player'])}</b> "
+            f"({own_pct:.0f}% owned) for <b>{fnum(dh.get('points'))} pts</b>"))
+
+    # Bench leaderboard top entry
+    bench_lb = league.get("bench_leaderboard") or []
+    if bench_lb:
+        b = bench_lb[0]
+        items.append(("&#128256;", "SEASON BENCH KING",
+            f"<b>{esc(b['name'])}</b> has wasted <b>{fnum(b.get('season_bench'))} pts</b> on the bench this season"))
+
+    if not items:
+        return ""
+
+    cards = []
+    for icon, label, body in items:
+        cards.append(f"""
+<div class="tp-card">
+  <div class="tp-icon">{icon}</div>
+  <div class="tp-body">
+    <div class="tp-label">{label}</div>
+    <div class="tp-text">{body}</div>
+  </div>
+</div>""")
+
+    return f"""
+<section class="talking-points">
+  {_divider("TALKING POINTS")}
+  <div class="tp-grid">{''.join(cards)}</div>
+</section>"""
+
+
 def _footer(meta: dict) -> str:
     gw = meta.get("gameweek", "")
     league = esc(meta.get("league_name", ""))
@@ -797,13 +881,65 @@ def _footer(meta: dict) -> str:
 </footer>"""
 
 
+# Known FB display-name → real name aliases
+_PHOTO_ALIASES: dict[str, str] = {
+    "white fang": "Sahil Rauniyar",
+    "ashish shrestha": "Aasis Shrestha",  # same person, FPL vs FB spelling
+}
+
+
+def _resolve_photos(manager_photos: dict, managers: list) -> dict:
+    """Return a photo lookup keyed by each manager's actual name.
+
+    Handles: case-insensitive matching, partial-name matching (first + last),
+    and the FB display-name aliases above.
+    """
+    # Build a case-insensitive index of the raw mapping
+    lower_map: dict[str, str] = {k.lower(): v for k, v in manager_photos.items()}
+    # Also index by alias
+    for alias_lower, real in _PHOTO_ALIASES.items():
+        if real in manager_photos:
+            lower_map[alias_lower] = manager_photos[real]
+
+    resolved: dict[str, str] = {}
+    for m in managers:
+        name = m.get("name", "")
+        if not name:
+            continue
+        # Exact (case-insensitive)
+        key = name.lower()
+        if key in lower_map:
+            resolved[name] = lower_map[key]
+            continue
+        # Alias lookup
+        if key in _PHOTO_ALIASES:
+            real = _PHOTO_ALIASES[key]
+            if real in manager_photos:
+                resolved[name] = manager_photos[real]
+                continue
+        # First + last name fuzzy: e.g. "brilendra panta" matches "Brilendra Murti Panta"
+        parts = name.lower().split()
+        if len(parts) >= 2:
+            first, last = parts[0], parts[-1]
+            for photo_name_lower, path in lower_map.items():
+                pn_parts = photo_name_lower.split()
+                if pn_parts and pn_parts[0] == first and pn_parts[-1] == last:
+                    resolved[name] = path
+                    break
+
+    return resolved
+
+
 # ── Master entry point ────────────────────────────────────────────────────── #
 def render_report_html(payload: dict) -> str:
     meta = payload.get("meta") or {}
     managers = payload.get("managers") or []
     league = payload.get("league") or {}
     narrative = payload.get("narrative") or ""
-    manager_photos = payload.get("manager_photos") or {}
+    raw_photos = payload.get("manager_photos") or {}
+
+    # Resolve photos against actual managers only (drops FB-group extras)
+    manager_photos = _resolve_photos(raw_photos, managers)
 
     body = "\n".join([
         _edition_bar(meta),
@@ -814,6 +950,7 @@ def render_report_html(payload: dict) -> str:
   <div class="lead-col">
     {_lead_article(narrative, managers, manager_photos)}
     {_hero(payload, managers, manager_photos)}
+    {_talking_points(payload, managers)}
   </div>
   {_sidebar(managers, manager_photos)}
 </div>""",
@@ -982,6 +1119,30 @@ body {{
   font-size: 16px; font-style: italic; color: {INK};
   line-height: 1.42; margin: 4px 0;
 }}
+
+/* ── Talking points ── */
+.talking-points {{ margin: 10px 0 4px; }}
+.tp-grid {{
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; margin-top: 6px;
+}}
+.tp-card {{
+  background: {PAPER}; border: 1px solid {RULE};
+  border-top: 3px solid {HEADLINE};
+  padding: 7px 9px; display: flex; gap: 8px; align-items: flex-start;
+}}
+.tp-icon {{ font-size: 18px; line-height: 1; flex-shrink: 0; margin-top: 1px; }}
+.tp-label {{
+  font-size: 8.5px; font-weight: 800; letter-spacing: 1.2px;
+  text-transform: uppercase; color: {HEADLINE};
+  margin-bottom: 3px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.tp-text {{
+  font-size: 12px; line-height: 1.45; color: {INK};
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.tp-text b {{ color: {HEADLINE}; }}
 
 /* ── Manager verdicts ── */
 .verdicts-section {{
