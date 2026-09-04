@@ -10,10 +10,12 @@ Designed at 1200px fixed width.
 
 from __future__ import annotations
 
+import base64
 import html
 import math
+import os
 from datetime import datetime
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 # --------------------------------------------------------------------------- #
 #  Design tokens — newspaper palette
@@ -40,6 +42,40 @@ SERIES_COLORS = [
 # --------------------------------------------------------------------------- #
 #  Helpers
 # --------------------------------------------------------------------------- #
+def _img_data_uri(path: str) -> str:
+    """Convert a local image to an inline base64 data URI."""
+    ext = os.path.splitext(path)[1].lower()
+    mime = "image/png" if ext == ".png" else "image/jpeg"
+    with open(path, "rb") as f:
+        data = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{data}"
+
+
+def _manager_avatar_html(name: str, manager_photos: dict, size: int = 40) -> str:
+    """Return <img> circular avatar if photo exists, else styled initials circle."""
+    photo_path = manager_photos.get(name) if manager_photos else None
+    if photo_path and os.path.exists(photo_path):
+        try:
+            uri = _img_data_uri(photo_path)
+            return (
+                f'<img src="{uri}" alt="{esc(name)}" '
+                f'style="width:{size}px;height:{size}px;border-radius:50%;'
+                f'object-fit:cover;border:2px solid {RULE};flex-shrink:0;">'
+            )
+        except Exception:
+            pass
+    # Fallback: initials circle
+    initials = "".join(w[0].upper() for w in name.split()[:2]) if name else "?"
+    colors = ["#8b0000","#1a5c1a","#1a3a8b","#7b4f00","#5a0072","#005f5f","#7a1a00","#004a24"]
+    bg = colors[hash(name) % len(colors)]
+    fs = max(10, size // 3)
+    return (
+        f'<div style="width:{size}px;height:{size}px;border-radius:50%;background:{bg};'
+        f'color:#fff;display:flex;align-items:center;justify-content:center;'
+        f'font-size:{fs}px;font-weight:800;flex-shrink:0;">{initials}</div>'
+    )
+
+
 def esc(x) -> str:
     return html.escape(str(x if x is not None else ""))
 
@@ -253,19 +289,45 @@ def render_masthead(meta: dict) -> str:
 </header>"""
 
 
-def render_banner(managers: List[dict], narrative: str) -> str:
-    """Big headline from narrative first line + winner callout."""
+def render_banner(managers: List[dict], narrative: str, hero_image_path: str = None) -> str:
+    """Big headline + optional DALL-E hero image banner."""
     if not managers:
         return ""
     leader = managers[0]
     first_line = ""
     if narrative:
         first_line = narrative.strip().split("\n")[0].strip()
-        # strip leading 'GW#: ' prefix
         if first_line and ":" in first_line[:8]:
             first_line = first_line.split(":", 1)[1].strip()
     if not first_line:
         first_line = f"{esc(leader.get('name',''))} leads the pack"
+
+    # Hero image block
+    hero_html = ""
+    if hero_image_path and os.path.exists(hero_image_path):
+        try:
+            uri = _img_data_uri(hero_image_path)
+            hero_html = f"""
+  <div style="border:2px solid {INK};margin:12px 0;overflow:hidden;max-height:260px;">
+    <img src="{uri}" alt="Gameweek hero" style="width:100%;max-height:260px;object-fit:cover;display:block;">
+  </div>
+  <div style="font-size:11px;font-style:italic;color:{MUTED};text-align:center;margin-bottom:8px;">
+    AI-generated: GW winner illustration
+  </div>"""
+        except Exception:
+            pass
+
+    if not hero_html:
+        # Styled placeholder
+        hero_html = f"""
+  <div style="border:2px solid {INK};margin:12px 0;padding:32px;text-align:center;
+              background:{PAPER};background-image:repeating-linear-gradient(
+                45deg,transparent,transparent 10px,rgba(0,0,0,.03) 10px,rgba(0,0,0,.03) 20px);">
+    <div style="font-size:11px;letter-spacing:3px;color:{MUTED};text-transform:uppercase;margin-bottom:8px;">GW Winner</div>
+    <div style="font-size:36px;font-weight:900;color:{HEADLINE};font-family:Georgia,serif;">{esc(leader.get('name',''))}</div>
+    <div style="font-size:18px;color:{INK_2};margin-top:6px;">{fnum(leader.get('gw_points'))} pts this gameweek</div>
+  </div>"""
+
     return f"""
 <div class="banner">
   <div class="banner-rule"></div>
@@ -276,12 +338,13 @@ def render_banner(managers: List[dict], narrative: str) -> str:
     · {fnum(leader.get('total_points'))} pts total
     · {fnum(leader.get('gw_points'))} this week
   </div>
+  {hero_html}
   <div class="banner-rule"></div>
 </div>"""
 
 
 def render_three_col(managers: List[dict], league: dict, narrative: str,
-                     player_photos: dict = None) -> str:
+                     player_photos: dict = None, manager_photos: dict = None) -> str:
     """Three-column layout: league table | captain picks | match report."""
     return f"""
 <div class="three-col">
@@ -289,7 +352,7 @@ def render_three_col(managers: List[dict], league: dict, narrative: str,
     {_league_table(managers)}
   </div>
   <div class="col-mid">
-    {_captain_column(managers, player_photos or {})}
+    {_captain_column(managers, player_photos or {}, manager_photos or {})}
   </div>
   <div class="col-right">
     {_match_report(narrative)}
@@ -332,7 +395,7 @@ def _league_table(managers: List[dict]) -> str:
 </table>"""
 
 
-def _captain_column(managers: List[dict], player_photos: dict) -> str:
+def _captain_column(managers: List[dict], player_photos: dict, manager_photos: dict = None) -> str:
     rows = []
     for m in managers[:8]:
         cap = m.get("captain") or "—"
@@ -340,8 +403,10 @@ def _captain_column(managers: List[dict], player_photos: dict) -> str:
         pts_str = f"{cap_pts}" if cap_pts is not None else "?"
         chip = m.get("chip")
         chip_tag = f' <span class="lt-chip">{esc(chip[:2].upper() if chip else "")}</span>' if chip else ""
+        avatar = _manager_avatar_html(m.get("name", ""), manager_photos or {}, size=36)
         rows.append(f"""
-    <div class="cap-row">
+    <div class="cap-row" style="gap:8px;">
+      {avatar}
       <div class="cap-info">
         <div class="cap-mgr">{esc(m.get('name',''))}{chip_tag}</div>
         <div class="cap-player">© {esc(cap)}</div>
@@ -426,7 +491,7 @@ def render_race_section(managers: List[dict]) -> str:
 </section>"""
 
 
-def render_manager_cards(managers: List[dict]) -> str:
+def render_manager_cards(managers: List[dict], manager_photos: dict = None) -> str:
     cards = []
     for idx, m in enumerate(managers):
         color = SERIES_COLORS[idx % len(SERIES_COLORS)]
@@ -437,6 +502,7 @@ def render_manager_cards(managers: List[dict]) -> str:
         cap = m.get("captain") or "—"
         cap_pts = m.get("captain_points", 0) or 0
         cap_cls = "cap-good" if cap_pts >= 10 else ("cap-meh" if cap_pts >= 6 else "cap-bad")
+        avatar = _manager_avatar_html(m.get("name", ""), manager_photos or {}, size=44)
         chip = m.get("chip")
         chip_html = f'<span class="mc-chip">{esc(chip)}</span>' if chip else ""
         hit = m.get("gw_hit", 0)
@@ -446,7 +512,7 @@ def render_manager_cards(managers: List[dict]) -> str:
         cards.append(f"""
     <div class="mc" style="border-top-color:{color}">
       <div class="mc-top">
-        <div class="mc-rank" style="color:{color}">{rank}</div>
+        {avatar}
         <div class="mc-id">
           <div class="mc-name">{esc(m.get('name',''))}</div>
           <div class="mc-team">{esc(m.get('team_name',''))}</div>
@@ -568,14 +634,16 @@ def render_report_html(payload: dict) -> str:
     league = payload.get("league") or {}
     narrative = payload.get("narrative") or ""
     player_photos = payload.get("player_photos") or {}
+    hero_image_path = payload.get("hero_image_path")
+    manager_photos = payload.get("manager_photos") or {}
 
     body = "".join([
         render_masthead(meta),
-        render_banner(managers, narrative),
-        render_three_col(managers, league, narrative, player_photos),
+        render_banner(managers, narrative, hero_image_path=hero_image_path),
+        render_three_col(managers, league, narrative, player_photos, manager_photos=manager_photos),
         render_stats_strip(managers, league),
         render_race_section(managers),
-        render_manager_cards(managers),
+        render_manager_cards(managers, manager_photos=manager_photos),
         render_intel(league),
         render_footer(meta),
     ])

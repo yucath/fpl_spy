@@ -1,7 +1,7 @@
 """
 report.py — data payload + single-image rendering for the FPL mini-league report.
 
-Two responsibilities:
+Three responsibilities:
 
 1. build_payload(...)  -> a single JSON-serialisable dict describing each
    manager's season and the mini-league picture. This is the *contract* the
@@ -10,15 +10,25 @@ Two responsibilities:
 2. render_html_to_png(...) -> render a (tall) HTML file to ONE high-DPI PNG
    using the same headless Chrome the Facebook sender relies on.
 
+3. DALL-E image helpers:
+   - generate_gw_hero_image()   — landscape hero banner for the GW winner
+   - generate_manager_avatar()  — retro trading-card avatar per manager
+   - get_or_generate_manager_photo() — priority: FB scraped → cached avatar → generate
+   - image_to_data_uri()        — base64-encode a local image for inline HTML
+
 Names are always real manager names (player_name), never FPL team names.
 """
 
 from __future__ import annotations
 
+import base64
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
@@ -161,6 +171,9 @@ def build_payload(
     gw_average: float,
     is_final: bool,
     season_label: str = "",
+    hero_image_path: Optional[str] = None,
+    manager_photos: Optional[Dict[str, str]] = None,
+    players_data: Optional[List[dict]] = None,
 ) -> dict:
     """Assemble the full report payload. Uses real manager names throughout."""
     managers = mini_league_data["standings"]["results"]
@@ -351,6 +364,8 @@ def build_payload(
         },
         "highlights": _remap_fun_facts(fun_facts, team_to_real),
         "narrative": (ai_insights or "").strip(),
+        "hero_image_path": hero_image_path if hero_image_path and os.path.exists(hero_image_path) else None,
+        "manager_photos": manager_photos or {},
     }
 
 
@@ -478,6 +493,180 @@ def _render_via_cli(html_path, png_path, width, scale, reason="") -> str:
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
     _autotrim_bottom(png_path)
     return png_path
+
+
+# --------------------------------------------------------------------------- #
+# Image helpers
+# --------------------------------------------------------------------------- #
+def image_to_data_uri(path: str, mime: str = "image/jpeg") -> str:
+    """Read a local image file and return a base64 data URI for inline HTML."""
+    with open(path, "rb") as f:
+        data = base64.b64encode(f.read()).decode("ascii")
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".png", ".apng"):
+        mime = "image/png"
+    elif ext in (".webp",):
+        mime = "image/webp"
+    return f"data:{mime};base64,{data}"
+
+
+_DALLE_CACHE_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "photos", "dalle")
+_AVATAR_CACHE_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "photos", "avatars")
+
+
+def _openai_client():
+    try:
+        from openai import OpenAI
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        return OpenAI(api_key=api_key)
+    except ImportError:
+        return None
+
+
+def generate_gw_hero_image(
+    gw_winner_name: str,
+    gw_points: int,
+    gameweek: int,
+    is_final: bool,
+    output_path: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Generate a DALL-E 3 landscape hero banner for the GW winner.
+    Cached per gameweek — re-uses the existing file if present.
+    Returns local file path, or None on failure.
+    """
+    os.makedirs(_DALLE_CACHE_DIR, exist_ok=True)
+    suffix = "final" if is_final else f"gw{gameweek}"
+    dest = output_path or os.path.join(_DALLE_CACHE_DIR, f"hero_{suffix}.png")
+
+    if os.path.exists(dest):
+        logger.info(f"Hero image cached: {dest}")
+        return dest
+
+    client = _openai_client()
+    if client is None:
+        logger.warning("OpenAI not available — skipping hero image")
+        return None
+
+    event_desc = "season champion" if is_final else f"Gameweek {gameweek} winner"
+    prompt = (
+        f"A dramatic newspaper broadsheet sports front-page hero image in the style of a 1920s "
+        f"woodcut engraving. The headline celebrates '{gw_winner_name}' as the {event_desc} "
+        f"with {gw_points} points in a fantasy football mini-league. "
+        f"Black ink on aged newsprint, crosshatching, bold composition, no text, "
+        f"cinematic wide format, celebrating football triumph."
+    )
+
+    try:
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size="1792x1024",
+            quality="standard",
+            n=1,
+        )
+        img_url = response.data[0].url
+        import requests as req
+        r = req.get(img_url, timeout=30)
+        if r.status_code == 200:
+            with open(dest, "wb") as f:
+                f.write(r.content)
+            logger.info(f"Hero image saved: {dest}")
+            return dest
+        else:
+            logger.warning(f"Failed to download hero image: HTTP {r.status_code}")
+    except Exception as e:
+        logger.warning(f"DALL-E hero image generation failed: {e}")
+    return None
+
+
+def generate_manager_avatar(
+    manager_name: str,
+    archetype_label: str = "",
+    output_path: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Generate a DALL-E 3 retro football trading-card avatar for one manager.
+    Cached per manager name — re-uses if file exists.
+    Returns local file path, or None on failure.
+    """
+    os.makedirs(_AVATAR_CACHE_DIR, exist_ok=True)
+    safe_name = "".join(c if c.isalnum() else "_" for c in manager_name)
+    dest = output_path or os.path.join(_AVATAR_CACHE_DIR, f"{safe_name}.png")
+
+    if os.path.exists(dest):
+        logger.info(f"Avatar cached: {dest}")
+        return dest
+
+    client = _openai_client()
+    if client is None:
+        logger.warning("OpenAI not available — skipping avatar generation")
+        return None
+
+    archetype_hint = f" Their manager archetype is '{archetype_label}'." if archetype_label else ""
+    prompt = (
+        f"A vintage 1970s football sticker card portrait of a fantasy football manager named "
+        f"'{manager_name}'.{archetype_hint} "
+        f"Retro illustrated style, bright bold colours, simple graphic lines, cheerful expression, "
+        f"wearing a football club tracksuit, oval frame border, no text, square format."
+    )
+
+    try:
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+        img_url = response.data[0].url
+        import requests as req
+        r = req.get(img_url, timeout=30)
+        if r.status_code == 200:
+            with open(dest, "wb") as f:
+                f.write(r.content)
+            logger.info(f"Avatar saved: {dest}")
+            return dest
+        else:
+            logger.warning(f"Failed to download avatar: HTTP {r.status_code}")
+    except Exception as e:
+        logger.warning(f"DALL-E avatar generation failed for {manager_name}: {e}")
+    return None
+
+
+def get_or_generate_manager_photo(
+    manager_name: str,
+    archetype_label: str = "",
+    fb_photos: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """
+    Priority:
+    1. FB-scraped photo (from fb_photo_scraper.load_photo_mapping)
+    2. Cached DALL-E avatar (already on disk)
+    3. Generate new DALL-E avatar (costs ~$0.04)
+
+    Returns local file path, or None.
+    """
+    # 1. FB scraped photo
+    if fb_photos:
+        fb_path = fb_photos.get(manager_name)
+        if fb_path and os.path.exists(fb_path):
+            return fb_path
+
+    # Also try loading from file if not passed in
+    try:
+        from fb_photo_scraper import load_photo_mapping
+        cached_mapping = load_photo_mapping()
+        fb_path = cached_mapping.get(manager_name)
+        if fb_path and os.path.exists(fb_path):
+            return fb_path
+    except Exception:
+        pass
+
+    # 2 + 3. Cached or generate avatar
+    return generate_manager_avatar(manager_name, archetype_label)
 
 
 def _autotrim_bottom(png_path: str) -> None:

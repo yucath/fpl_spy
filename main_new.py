@@ -3759,6 +3759,50 @@ def main(args):
     gw_average = calculate_gw_average(mini_league_data, gameweek)
     league_name = mini_league_data.get('league', {}).get('name', 'Mini League')
 
+    # -------------------------------------------------------------------- #
+    # Image generation (DALL-E hero + manager photos)
+    # -------------------------------------------------------------------- #
+    # GW winner = top of current_scores (already sorted by net_points desc)
+    gw_winner = current_scores[0] if current_scores else {}
+    gw_winner_name = gw_winner.get("manager", "")
+    gw_winner_pts = gw_winner.get("net_points", 0)
+
+    hero_image_path = None
+    manager_photos: Dict[str, str] = {}
+
+    if is_final:
+        try:
+            hero_image_path = report_mod.generate_gw_hero_image(
+                gw_winner_name, gw_winner_pts, gameweek, is_final=True)
+        except Exception as e:
+            logger.warning(f"Hero image generation failed: {e}")
+
+        # Generate/fetch manager photos for all managers (one-time DALL-E cost, then cached)
+        for m in mini_league_data['standings']['results']:
+            mgr_name = m.get('player_name') or m['entry_name']
+            archetype = archetypes.get(m['entry_name'], {}).get('label', '')
+            try:
+                photo_path = report_mod.get_or_generate_manager_photo(mgr_name, archetype)
+                if photo_path:
+                    manager_photos[mgr_name] = photo_path
+            except Exception as e:
+                logger.warning(f"Manager photo failed for {mgr_name}: {e}")
+    else:
+        # In live mode: only use cached photos (no DALL-E spend mid-GW)
+        try:
+            from fb_photo_scraper import load_photo_mapping
+            manager_photos = load_photo_mapping()
+        except Exception:
+            pass
+        # Check for cached avatars too
+        for m in mini_league_data['standings']['results']:
+            mgr_name = m.get('player_name') or m['entry_name']
+            if mgr_name not in manager_photos:
+                safe = "".join(c if c.isalnum() else "_" for c in mgr_name)
+                cached = os.path.join(local_path, "photos", "avatars", f"{safe}.png")
+                if os.path.exists(cached):
+                    manager_photos[mgr_name] = cached
+
     payload = report_mod.build_payload(
         mini_league_data=mini_league_data,
         gameweek=gameweek,
@@ -3769,6 +3813,9 @@ def main(args):
         ai_insights=ai_insights,
         gw_average=gw_average,
         is_final=is_final,
+        hero_image_path=hero_image_path,
+        manager_photos=manager_photos,
+        players_data=players_data,
     )
 
     payload_file = os.path.join(local_path, f"report_data_gw{gameweek}.json")

@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>FPL Report – GW2</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #faf8f0; color: #1a1a1a; }
+body {
+  width: 1200px; margin: 0 auto;
+  font-family: Georgia, "Times New Roman", Times, serif;
+  font-size: 15px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.page { width: 1200px; padding: 28px 40px 40px; }
+
+/* ---- Masthead ---- */
+.masthead { margin-bottom: 18px; }
+.masthead-rule { height: 4px; background: #1a1a1a; margin: 4px 0; }
+.top-rule { height: 8px; }
+.thin-rule { height: 1px; margin-top: 2px; }
+.masthead-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0;
+}
+.masthead-meta-left, .masthead-meta-right {
+  font-size: 10px; letter-spacing: 0.8px; color: #6b6b6b;
+  text-transform: uppercase; line-height: 1.6; min-width: 200px;
+}
+.masthead-meta-right { text-align: right; }
+.mast-kicker { font-weight: 700; color: #3a3a3a; }
+.masthead-title { text-align: center; flex: 1; }
+.mast-name {
+  font-size: 42px; font-weight: 900; letter-spacing: -1px; line-height: 1;
+  color: #1a1a1a;
+}
+.mast-sub {
+  font-size: 11px; letter-spacing: 5px; color: #6b6b6b; margin-top: 3px;
+  text-transform: uppercase;
+}
+.mast-gw { font-weight: 700; color: #8b0000; }
+.mast-stats { font-size: 10px; color: #6b6b6b; }
+
+/* ---- Banner ---- */
+.banner { margin-bottom: 18px; }
+.banner-rule { height: 2px; background: #c8b89a; margin: 6px 0; }
+.banner-headline {
+  font-size: 34px; font-weight: 900; line-height: 1.1; color: #8b0000;
+  text-align: center; padding: 6px 0;
+  text-transform: uppercase; letter-spacing: -0.5px;
+}
+.banner-deck {
+  text-align: center; font-size: 13px; color: #3a3a3a; letter-spacing: 0.3px;
+  margin-top: 4px; font-style: italic;
+}
+
+/* ---- Three-column layout ---- */
+.three-col {
+  display: grid; grid-template-columns: 320px 240px 1fr;
+  gap: 0; margin-bottom: 18px;
+  border: 1px solid #c8b89a;
+}
+.col-left { border-right: 1px solid #c8b89a; padding: 16px 14px; }
+.col-mid { border-right: 1px solid #c8b89a; padding: 16px 14px; }
+.col-right { padding: 16px 16px; }
+.col-head {
+  font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+  color: #6b6b6b; border-bottom: 2px solid #1a1a1a; padding-bottom: 5px; margin-bottom: 10px;
+}
+
+/* ---- League table ---- */
+.lt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lt thead tr { border-bottom: 1px solid #c8b89a; }
+.lt th {
+  font-size: 10px; letter-spacing: 0.8px; color: #6b6b6b; text-transform: uppercase;
+  font-weight: 700; padding: 3px 4px; text-align: right;
+}
+.lt th:nth-child(3) { text-align: left; }
+.lt td { padding: 5px 4px; vertical-align: middle; border-bottom: 1px solid #c8b89a; }
+.lt tbody tr:last-child td { border-bottom: none; }
+.lt-leader td { background: #fffbea; font-weight: 700; }
+.lt-rk { font-size: 16px; font-weight: 800; text-align: center; color: #1a1a1a; }
+.lt-mv { text-align: center; }
+.lt-nm { font-size: 13px; font-weight: 600; color: #1a1a1a; }
+.lt-tot { text-align: right; font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; }
+.lt-gw { text-align: right; font-weight: 700; color: #8b0000; font-variant-numeric: tabular-nums; }
+.lt-chip {
+  font-size: 9px; font-weight: 800; background: #e8e0ff; color: #4a00a0;
+  border-radius: 3px; padding: 1px 4px; vertical-align: middle; margin-left: 2px;
+}
+.lt-hit {
+  font-size: 9px; font-weight: 800; background: #ffe0e0; color: #8b0000;
+  border-radius: 3px; padding: 1px 4px; vertical-align: middle; margin-left: 2px;
+}
+.mv-up { color: #1a5c1a; font-weight: 800; font-size: 11px; }
+.mv-dn { color: #8b0000; font-weight: 800; font-size: 11px; }
+.mv-flat { color: #6b6b6b; font-size: 11px; }
+
+/* ---- Captain column ---- */
+.cap-list { display: flex; flex-direction: column; gap: 8px; }
+.cap-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid #c8b89a;
+}
+.cap-row:last-child { border-bottom: none; }
+.cap-mgr { font-size: 12px; font-weight: 700; color: #1a1a1a; }
+.cap-player { font-size: 11px; color: #6b6b6b; margin-top: 1px; }
+.cap-pts { font-size: 16px; font-weight: 800; text-align: right; min-width: 44px; }
+.cap-good { color: #1a5c1a; }
+.cap-meh { color: #3a3a3a; }
+
+/* ---- Match report ---- */
+.report-para {
+  font-size: 14px; line-height: 1.65; color: #1a1a1a; margin-bottom: 10px;
+  text-align: justify; hyphens: auto;
+}
+.report-para.dropcap { margin-top: 4px; }
+.drop {
+  float: left; font-size: 52px; line-height: 0.78; font-weight: 900; color: #8b0000;
+  margin: 4px 6px -2px 0; font-family: Georgia, serif;
+}
+.no-narrative { color: #6b6b6b; font-style: italic; font-size: 13px; }
+
+/* ---- Stats strip ---- */
+.stats-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 0; border: 1px solid #c8b89a; margin-bottom: 18px;
+}
+.stat-box {
+  padding: 16px 16px; border-right: 1px solid #c8b89a; text-align: center;
+}
+.stat-box:last-child { border-right: none; }
+.stat-emoji { font-size: 24px; margin-bottom: 4px; }
+.stat-kicker { font-size: 9px; letter-spacing: 1.5px; color: #6b6b6b; text-transform: uppercase; font-weight: 700; }
+.stat-name { font-size: 14px; font-weight: 800; color: #1a1a1a; margin-top: 4px; }
+.stat-value { font-size: 22px; font-weight: 900; color: #8b0000; margin-top: 2px; }
+.stat-sub { font-size: 10px; color: #6b6b6b; margin-top: 2px; }
+
+/* ---- Section header ---- */
+.np-section { margin-bottom: 22px; }
+.np-section-head {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+}
+.np-head-rule { flex: 1; height: 2px; background: #c8b89a; }
+.np-head-title {
+  font-size: 11px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase;
+  color: #3a3a3a; white-space: nowrap;
+}
+
+/* ---- Race chart ---- */
+.chart-box {
+  border: 1px solid #c8b89a; padding: 12px; background: #f5f2e8;
+  overflow-x: auto;
+}
+.chart-caption { font-size: 10px; color: #6b6b6b; text-align: center; margin-top: 6px; }
+
+/* ---- Manager cards ---- */
+.mc-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}
+.mc {
+  border: 1px solid #c8b89a; border-top: 3px solid; background: #f5f2e8;
+  padding: 12px 12px 10px;
+}
+.mc-top { display: flex; align-items: center; gap: 10px; }
+.mc-rank { font-size: 24px; font-weight: 900; }
+.mc-id { flex: 1; min-width: 0; }
+.mc-name { font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-team { font-size: 10px; color: #6b6b6b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-gwv { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.mc-tags { display: flex; gap: 5px; flex-wrap: wrap; margin: 6px 0 4px; font-size: 10px; }
+.mc-chip {
+  background: #e8e0ff; color: #4a00a0; border-radius: 3px;
+  padding: 1px 5px; font-weight: 800;
+}
+.mc-hit {
+  background: #ffe0e0; color: #8b0000; border-radius: 3px;
+  padding: 1px 5px; font-weight: 800;
+}
+.mc-spark { margin: 4px 0; }
+.mc-stats { margin-top: 6px; border-top: 1px solid #c8b89a; padding-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.mcs { display: flex; justify-content: space-between; font-size: 11px; }
+.mcs-k { color: #6b6b6b; }
+.mcs-v { font-weight: 700; text-align: right; }
+.cap-good { color: #1a5c1a; }
+.cap-bad { color: #8b0000; }
+.cap-meh { color: #3a3a3a; }
+
+/* ---- Intel section ---- */
+.intel-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 0; border: 1px solid #c8b89a;
+}
+.intel-panel { padding: 14px 14px; border-right: 1px solid #c8b89a; }
+.intel-panel:last-child { border-right: none; }
+.intel-panel-head {
+  font-size: 10px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+  color: #3a3a3a; border-bottom: 1px solid #c8b89a; padding-bottom: 6px; margin-bottom: 10px;
+}
+.intel-note { font-weight: 500; color: #6b6b6b; letter-spacing: 0; }
+.intel-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid #c8b89a; font-size: 12px;
+}
+.intel-row:last-child { border-bottom: none; }
+.intel-rank { font-weight: 800; color: #6b6b6b; min-width: 24px; }
+.intel-name { flex: 1; font-weight: 600; }
+.intel-val { font-weight: 800; color: #8b0000; min-width: 36px; text-align: right; }
+/* Captaincy bars */
+.ct-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 12px; }
+.ct-row:last-child { margin-bottom: 0; }
+.ct-name { font-weight: 600; min-width: 90px; }
+.ct-bar-wrap { flex: 1; background: #c8b89a; border-radius: 2px; height: 8px; overflow: hidden; }
+.ct-bar { height: 100%; background: #8b0000; border-radius: 2px; }
+.ct-meta { font-size: 10px; color: #6b6b6b; white-space: nowrap; min-width: 70px; text-align: right; }
+/* Rivalries */
+.rv-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid #c8b89a; font-size: 12px;
+}
+.rv-row:last-child { border-bottom: none; }
+.rv-a { font-weight: 700; flex: 1; }
+.rv-gap {
+  font-size: 10px; font-weight: 800; background: #fffbea; border: 1px solid #c8960c;
+  border-radius: 3px; padding: 1px 5px; white-space: nowrap; color: #c8960c;
+}
+.rv-b { font-size: 11px; color: #6b6b6b; flex: 1; text-align: right; }
+
+/* ---- Footer ---- */
+.np-footer { margin-top: 20px; }
+.footer-rule { height: 3px; background: #1a1a1a; margin-bottom: 2px; }
+.footer-inner {
+  display: flex; justify-content: space-between; font-size: 10px;
+  color: #6b6b6b; padding: 4px 0; letter-spacing: 0.5px;
+}
+.footer-right { text-align: right; }
+</style>
+</head>
+<body>
+<div class="page">
+<header class="masthead">
+  <div class="masthead-rule top-rule"></div>
+  <div class="masthead-inner">
+    <div class="masthead-meta-left">
+      <div class="mast-kicker">FANTASY PREMIER LEAGUE · MINI-LEAGUE REPORT</div>
+      <div class="mast-season">SEASON 2025/26</div>
+    </div>
+    <div class="masthead-title">
+      <div class="mast-name">Pullman Football Samaj</div>
+      <div class="mast-sub">THE GAZETTE</div>
+    </div>
+    <div class="masthead-meta-right">
+      <div class="mast-date">TUESDAY, 01 SEPTEMBER 2026</div>
+      <div class="mast-gw">GAMEWEEK 2 &nbsp;·&nbsp; FINAL</div>
+      <div class="mast-stats">15 managers · avg 84.3 pts</div>
+    </div>
+  </div>
+  <div class="masthead-rule"></div>
+  <div class="masthead-rule thin-rule"></div>
+</header>
+<div class="banner">
+  <div class="banner-rule"></div>
+  <h1 class="banner-headline">BALLAV&#x27;S BRILLIANCE BLAZES THROUGH!</h1>
+  <div class="banner-deck">
+    GW2
+    LEADER: <strong>Ballav Aryal</strong>
+    · 181 pts total
+    · 127 this week
+  </div>
+  
+  <div style="border:2px solid #1a1a1a;margin:12px 0;padding:32px;text-align:center;
+              background:#f5f2e8;background-image:repeating-linear-gradient(
+                45deg,transparent,transparent 10px,rgba(0,0,0,.03) 10px,rgba(0,0,0,.03) 20px);">
+    <div style="font-size:11px;letter-spacing:3px;color:#6b6b6b;text-transform:uppercase;margin-bottom:8px;">GW Winner</div>
+    <div style="font-size:36px;font-weight:900;color:#8b0000;font-family:Georgia,serif;">Ballav Aryal</div>
+    <div style="font-size:18px;color:#3a3a3a;margin-top:6px;">127 pts this gameweek</div>
+  </div>
+  <div class="banner-rule"></div>
+</div>
+<div class="three-col">
+  <div class="col-left">
+    
+<div class="col-head">LEAGUE TABLE</div>
+<table class="lt">
+  <thead><tr>
+    <th>#</th><th></th><th>Manager</th><th>Total</th><th>GW</th>
+  </tr></thead>
+  <tbody>
+    <tr class="lt-leader">
+      <td class="lt-rk">🥇</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">Ballav Aryal <span class="lt-chip">BE</span></td>
+      <td class="lt-tot">181</td>
+      <td class="lt-gw">127</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">🥈</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">Abodh Poudyal </td>
+      <td class="lt-tot">161</td>
+      <td class="lt-gw">113</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">🥉</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">Rajan Adhikari </td>
+      <td class="lt-tot">157</td>
+      <td class="lt-gw">107</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">4</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">Santosh Shiwakoti </td>
+      <td class="lt-tot">157</td>
+      <td class="lt-gw">104</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">5</td>
+      <td class="lt-mv"><span class="mv-dn">▼</span></td>
+      <td class="lt-nm">Bikal Pudasaini </td>
+      <td class="lt-tot">153</td>
+      <td class="lt-gw">95</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">6</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">White Fang </td>
+      <td class="lt-tot">152</td>
+      <td class="lt-gw">105</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">7</td>
+      <td class="lt-mv"><span class="mv-dn">▼</span></td>
+      <td class="lt-nm">Nilam Dahal </td>
+      <td class="lt-tot">145</td>
+      <td class="lt-gw">83</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">8</td>
+      <td class="lt-mv"><span class="mv-dn">▼</span></td>
+      <td class="lt-nm">Ashish Shrestha </td>
+      <td class="lt-tot">139</td>
+      <td class="lt-gw">82</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">9</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">Achyut Paudel </td>
+      <td class="lt-tot">133</td>
+      <td class="lt-gw">93</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">10</td>
+      <td class="lt-mv"><span class="mv-dn">▼</span></td>
+      <td class="lt-nm">Atit Parajuli </td>
+      <td class="lt-tot">130</td>
+      <td class="lt-gw">78</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">11</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">brilendra panta </td>
+      <td class="lt-tot">121</td>
+      <td class="lt-gw">78</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">12</td>
+      <td class="lt-mv"><span class="mv-up">▲</span></td>
+      <td class="lt-nm">Deepak Joshi </td>
+      <td class="lt-tot">100</td>
+      <td class="lt-gw">66</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">13</td>
+      <td class="lt-mv"><span class="mv-dn">▼</span></td>
+      <td class="lt-nm">Amogh Poudyal </td>
+      <td class="lt-tot">94</td>
+      <td class="lt-gw">45</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">14</td>
+      <td class="lt-mv"><span class="mv-dn">▼</span></td>
+      <td class="lt-nm">Shiva Poudel </td>
+      <td class="lt-tot">92</td>
+      <td class="lt-gw">47</td>
+    </tr>
+    <tr class="">
+      <td class="lt-rk">15</td>
+      <td class="lt-mv"><span class="mv-dn">▼</span></td>
+      <td class="lt-nm">Saugat Ghimire </td>
+      <td class="lt-tot">90</td>
+      <td class="lt-gw">41</td>
+    </tr></tbody>
+</table>
+  </div>
+  <div class="col-mid">
+    
+<div class="col-head">CAPTAIN PICKS</div>
+<div class="cap-list">
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#1a3a8b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">BA</div>
+      <div class="cap-info">
+        <div class="cap-mgr">Ballav Aryal <span class="lt-chip">BE</span></div>
+        <div class="cap-player">© B.Fernandes</div>
+      </div>
+      <div class="cap-pts cap-good">46pts</div>
+    </div>
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#5a0072;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">AP</div>
+      <div class="cap-info">
+        <div class="cap-mgr">Abodh Poudyal</div>
+        <div class="cap-player">© B.Fernandes</div>
+      </div>
+      <div class="cap-pts cap-good">46pts</div>
+    </div>
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#8b0000;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">RA</div>
+      <div class="cap-info">
+        <div class="cap-mgr">Rajan Adhikari</div>
+        <div class="cap-player">© Haaland</div>
+      </div>
+      <div class="cap-pts cap-good">26pts</div>
+    </div>
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#005f5f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">SS</div>
+      <div class="cap-info">
+        <div class="cap-mgr">Santosh Shiwakoti</div>
+        <div class="cap-player">© Haaland</div>
+      </div>
+      <div class="cap-pts cap-good">26pts</div>
+    </div>
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#8b0000;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">BP</div>
+      <div class="cap-info">
+        <div class="cap-mgr">Bikal Pudasaini</div>
+        <div class="cap-player">© B.Fernandes</div>
+      </div>
+      <div class="cap-pts cap-good">46pts</div>
+    </div>
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#7b4f00;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">WF</div>
+      <div class="cap-info">
+        <div class="cap-mgr">White Fang</div>
+        <div class="cap-player">© B.Fernandes</div>
+      </div>
+      <div class="cap-pts cap-good">46pts</div>
+    </div>
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#005f5f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">ND</div>
+      <div class="cap-info">
+        <div class="cap-mgr">Nilam Dahal</div>
+        <div class="cap-player">© Havertz</div>
+      </div>
+      <div class="cap-pts cap-meh">4pts</div>
+    </div>
+    <div class="cap-row" style="gap:8px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#5a0072;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">AS</div>
+      <div class="cap-info">
+        <div class="cap-mgr">Ashish Shrestha</div>
+        <div class="cap-player">© Haaland</div>
+      </div>
+      <div class="cap-pts cap-good">26pts</div>
+    </div></div>
+  </div>
+  <div class="col-right">
+    
+<div class="col-head">MATCH REPORT</div>
+<p class="report-para dropcap"><span class="drop">W</span>hat a week to be Ballav Aryal! He stormed through with a jaw-dropping 127 points, smashing his personal best AND leaving everyone else in the dust. Captaining Bruno Fernandes was clearly the masterstroke, racking up 23 points and helping him stretch his lead to a comfortable 20 points over Abodh Poudyal, who also had a solid week with 113 points. If you didn’t think B.Fernandes could be a captaincy option, just look at these two!</p><p class="report-para">Rajan Adhikari must be wondering how he can squeeze more from his squad as he scraped by with 107 points, barely keeping pace with Santosh Shiwakoti and his Haaland double act, who both delivered a meh 13 points each. White Fang had a nice little rise to 105 points, but he’s still got a mountain to climb to catch the front-runners.</p><p class="report-para">Now, let’s address the bottom of the table where Saugat Ghimire’s captaincy of Watkins earned him a whopping 0 points - not exactly what you’d call a “captain’s performance,” my friend! Deepak Joshi and his Thiago pick are probably debating which is worse: his 2 points or sitting in 12th place.</p><p class="report-para">Next week: will Saugat actually pick a player who plays football? Stay tuned!</p>
+  </div>
+</div>
+<div class="stats-strip">
+  
+    <div class="stat-box">
+      <div class="stat-emoji">⚡</div>
+      <div class="stat-kicker">GW TOP SCORER</div>
+      <div class="stat-name">Ballav Aryal</div>
+      <div class="stat-value">127 pts</div>
+      <div class="stat-sub">© B.Fernandes</div>
+    </div>
+  
+    <div class="stat-box">
+      <div class="stat-emoji">📈</div>
+      <div class="stat-kicker">BIGGEST RISER</div>
+      <div class="stat-name">Abodh Poudyal</div>
+      <div class="stat-value">+6 place(s)</div>
+      <div class="stat-sub">moved up this week</div>
+    </div>
+  
+    <div class="stat-box">
+      <div class="stat-emoji">🪑</div>
+      <div class="stat-kicker">BENCH PAIN KING</div>
+      <div class="stat-name">Rajan Adhikari</div>
+      <div class="stat-value">36 pts</div>
+      <div class="stat-sub">season bench points</div>
+    </div>
+  
+    <div class="stat-box">
+      <div class="stat-emoji">🎯</div>
+      <div class="stat-kicker">BEST CAPTAIN</div>
+      <div class="stat-name">Ballav Aryal</div>
+      <div class="stat-value">46 pts</div>
+      <div class="stat-sub">© B.Fernandes</div>
+    </div>
+</div>
+<section class="np-section">
+  <div class="np-section-head">
+    <span class="np-head-rule"></span>
+    <span class="np-head-title">THE SEASON RACE</span>
+    <span class="np-head-rule"></span>
+  </div>
+  <div class="chart-box"><svg width="1100" height="360" viewBox="0 0 1100 360"><line x1="36" y1="16.0" x2="960" y2="16.0" stroke="#c8b89a" stroke-width="0.7" stroke-dasharray="3 4"/><text x="28" y="20.0" text-anchor="end" fill="#6b6b6b" font-size="11" font-family="Georgia,serif">#1</text><line x1="36" y1="151.4" x2="960" y2="151.4" stroke="#c8b89a" stroke-width="0.7" stroke-dasharray="3 4"/><text x="28" y="155.4" text-anchor="end" fill="#6b6b6b" font-size="11" font-family="Georgia,serif">#7</text><line x1="36" y1="332.0" x2="960" y2="332.0" stroke="#c8b89a" stroke-width="0.7" stroke-dasharray="3 4"/><text x="28" y="336.0" text-anchor="end" fill="#6b6b6b" font-size="11" font-family="Georgia,serif">#15</text><text x="36.0" y="352" text-anchor="middle" fill="#6b6b6b" font-size="11" font-family="Georgia,serif">GW1</text><text x="960.0" y="352" text-anchor="middle" fill="#6b6b6b" font-size="11" font-family="Georgia,serif">GW2</text><polyline points="36.00,83.71 960.00,16.00" fill="none" stroke="#8b0000" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="16.0" r="3" fill="#8b0000"/><polyline points="36.00,174.00 960.00,38.57" fill="none" stroke="#1a5c1a" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="38.6" r="2" fill="#1a5c1a"/><polyline points="36.00,151.43 960.00,61.14" fill="none" stroke="#1a3a8b" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="61.1" r="2" fill="#1a3a8b"/><polyline points="36.00,106.29 960.00,83.71" fill="none" stroke="#7b4f00" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="83.7" r="2" fill="#7b4f00"/><polyline points="36.00,38.57 960.00,106.29" fill="none" stroke="#5a0072" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="106.3" r="2" fill="#5a0072"/><polyline points="36.00,196.57 960.00,128.86" fill="none" stroke="#005f5f" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="128.9" r="2" fill="#005f5f"/><polyline points="36.00,16.00 960.00,151.43" fill="none" stroke="#7a1a00" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="151.4" r="2" fill="#7a1a00"/><polyline points="36.00,61.14 960.00,174.00" fill="none" stroke="#004a24" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="174.0" r="2" fill="#004a24"/><polyline points="36.00,309.43 960.00,196.57" fill="none" stroke="#003d7a" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="196.6" r="2" fill="#003d7a"/><polyline points="36.00,128.86 960.00,219.14" fill="none" stroke="#6b3d00" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="219.1" r="2" fill="#6b3d00"/><polyline points="36.00,264.29 960.00,241.71" fill="none" stroke="#4a006b" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="241.7" r="2" fill="#4a006b"/><polyline points="36.00,332.00 960.00,264.29" fill="none" stroke="#003838" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="264.3" r="2" fill="#003838"/><polyline points="36.00,219.14 960.00,286.86" fill="none" stroke="#5c1a00" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="286.9" r="2" fill="#5c1a00"/><polyline points="36.00,286.86 960.00,309.43" fill="none" stroke="#1a4a00" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="309.4" r="2" fill="#1a4a00"/><polyline points="36.00,241.71 960.00,332.00" fill="none" stroke="#00286b" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="960.0" cy="332.0" r="2" fill="#00286b"/><line x1="960" y1="16.0" x2="966" y2="16.0" stroke="#8b0000" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="16.0" r="2.5" fill="#8b0000"/><text x="977" y="20.0" fill="#1a1a1a" font-size="11" font-weight="700" font-family="Georgia,serif">Ballav</text><line x1="960" y1="38.6" x2="966" y2="38.6" stroke="#1a5c1a" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="38.6" r="2.5" fill="#1a5c1a"/><text x="977" y="42.6" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Abodh</text><line x1="960" y1="61.1" x2="966" y2="61.1" stroke="#1a3a8b" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="61.1" r="2.5" fill="#1a3a8b"/><text x="977" y="65.1" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Rajan</text><line x1="960" y1="83.7" x2="966" y2="83.7" stroke="#7b4f00" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="83.7" r="2.5" fill="#7b4f00"/><text x="977" y="87.7" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Santosh</text><line x1="960" y1="106.3" x2="966" y2="106.3" stroke="#5a0072" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="106.3" r="2.5" fill="#5a0072"/><text x="977" y="110.3" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Bikal</text><line x1="960" y1="128.9" x2="966" y2="128.9" stroke="#005f5f" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="128.9" r="2.5" fill="#005f5f"/><text x="977" y="132.9" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">White</text><line x1="960" y1="151.4" x2="966" y2="151.4" stroke="#7a1a00" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="151.4" r="2.5" fill="#7a1a00"/><text x="977" y="155.4" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Nilam</text><line x1="960" y1="174.0" x2="966" y2="174.0" stroke="#004a24" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="174.0" r="2.5" fill="#004a24"/><text x="977" y="178.0" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Ashish</text><line x1="960" y1="196.6" x2="966" y2="196.6" stroke="#003d7a" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="196.6" r="2.5" fill="#003d7a"/><text x="977" y="200.6" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Achyut</text><line x1="960" y1="219.1" x2="966" y2="219.1" stroke="#6b3d00" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="219.1" r="2.5" fill="#6b3d00"/><text x="977" y="223.1" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Atit</text><line x1="960" y1="241.7" x2="966" y2="241.7" stroke="#4a006b" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="241.7" r="2.5" fill="#4a006b"/><text x="977" y="245.7" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">brilendra</text><line x1="960" y1="264.3" x2="966" y2="264.3" stroke="#003838" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="264.3" r="2.5" fill="#003838"/><text x="977" y="268.3" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Deepak</text><line x1="960" y1="286.9" x2="966" y2="286.9" stroke="#5c1a00" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="286.9" r="2.5" fill="#5c1a00"/><text x="977" y="290.9" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Amogh</text><line x1="960" y1="309.4" x2="966" y2="309.4" stroke="#1a4a00" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="309.4" r="2.5" fill="#1a4a00"/><text x="977" y="313.4" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Shiva</text><line x1="960" y1="332.0" x2="966" y2="332.0" stroke="#00286b" stroke-width="0.8" stroke-opacity="0.6"/><circle cx="970" cy="332.0" r="2.5" fill="#00286b"/><text x="977" y="336.0" fill="#1a1a1a" font-size="11" font-weight="500" font-family="Georgia,serif">Saugat</text></svg></div>
+  <div class="chart-caption">Mini-league position after each gameweek · 1st place at top</div>
+</section>
+<section class="np-section">
+  <div class="np-section-head">
+    <span class="np-head-rule"></span>
+    <span class="np-head-title">MANAGER DOSSIERS</span>
+    <span class="np-head-rule"></span>
+  </div>
+  <div class="mc-grid">
+    <div class="mc" style="border-top-color:#8b0000">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#1a3a8b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">BA</div>
+        <div class="mc-id">
+          <div class="mc-name">Ballav Aryal</div>
+          <div class="mc-team">Damadol United</div>
+        </div>
+        <div class="mc-gwv" style="color:#8b0000">127</div>
+      </div>
+      <div class="mc-tags"><span class="mc-chip">Bench Boost</span></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#8b0000" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#8b0000"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© B.Fernandes · 46pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">0 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">181 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">170k</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#1a5c1a">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#5a0072;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">AP</div>
+        <div class="mc-id">
+          <div class="mc-name">Abodh Poudyal</div>
+          <div class="mc-team">FantasyFC</div>
+        </div>
+        <div class="mc-gwv" style="color:#1a5c1a">113</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#1a5c1a" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#1a5c1a"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© B.Fernandes · 46pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">2 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">161 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">950k</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#1a3a8b">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#8b0000;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">RA</div>
+        <div class="mc-id">
+          <div class="mc-name">Rajan Adhikari</div>
+          <div class="mc-team">Pacific FC</div>
+        </div>
+        <div class="mc-gwv" style="color:#1a3a8b">107</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#1a3a8b" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#1a3a8b"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© Haaland · 26pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">18 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">157 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">1.3M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#7b4f00">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#005f5f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">SS</div>
+        <div class="mc-id">
+          <div class="mc-name">Santosh Shiwakoti</div>
+          <div class="mc-team">Jaadugar</div>
+        </div>
+        <div class="mc-gwv" style="color:#7b4f00">104</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#7b4f00" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#7b4f00"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© Haaland · 26pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">1 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">157 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">1.3M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#5a0072">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#8b0000;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">BP</div>
+        <div class="mc-id">
+          <div class="mc-name">Bikal Pudasaini</div>
+          <div class="mc-team">Thus Spoke United</div>
+        </div>
+        <div class="mc-gwv" style="color:#5a0072">95</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#5a0072" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#5a0072"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© B.Fernandes · 46pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">9 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">153 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">1.6M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#005f5f">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#7b4f00;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">WF</div>
+        <div class="mc-id">
+          <div class="mc-name">White Fang</div>
+          <div class="mc-team">Iguanas Paws</div>
+        </div>
+        <div class="mc-gwv" style="color:#005f5f">105</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#005f5f" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#005f5f"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© B.Fernandes · 46pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">2 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">152 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">1.8M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#7a1a00">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#005f5f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">ND</div>
+        <div class="mc-id">
+          <div class="mc-name">Nilam Dahal</div>
+          <div class="mc-team">Szvolazi</div>
+        </div>
+        <div class="mc-gwv" style="color:#7a1a00">83</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#7a1a00" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#7a1a00"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-bad">© Havertz · 4pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">8 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">145 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">2.5M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#004a24">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#5a0072;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">AS</div>
+        <div class="mc-id">
+          <div class="mc-name">Ashish Shrestha</div>
+          <div class="mc-team">Pending Moderation</div>
+        </div>
+        <div class="mc-gwv" style="color:#004a24">82</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#004a24" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#004a24"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© Haaland · 26pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">5 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">139 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">3.2M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#003d7a">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#1a5c1a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">AP</div>
+        <div class="mc-id">
+          <div class="mc-name">Achyut Paudel</div>
+          <div class="mc-team">JitnaSakeJit</div>
+        </div>
+        <div class="mc-gwv" style="color:#003d7a">93</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#003d7a" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#003d7a"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© Haaland · 26pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">6 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">133 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">4.0M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#6b3d00">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#7a1a00;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">AP</div>
+        <div class="mc-id">
+          <div class="mc-name">Atit Parajuli</div>
+          <div class="mc-team">Dark Knight</div>
+        </div>
+        <div class="mc-gwv" style="color:#6b3d00">78</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#6b3d00" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#6b3d00"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© Haaland · 26pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">19 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">130 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">4.5M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#4a006b">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#005f5f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">BP</div>
+        <div class="mc-id">
+          <div class="mc-name">brilendra panta</div>
+          <div class="mc-team">Arsenal Hater</div>
+        </div>
+        <div class="mc-gwv" style="color:#4a006b">78</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#4a006b" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#4a006b"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© João Pedro · 18pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">0 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">121 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">5.6M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#003838">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#7b4f00;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">DJ</div>
+        <div class="mc-id">
+          <div class="mc-name">Deepak Joshi</div>
+          <div class="mc-team">jddeepak</div>
+        </div>
+        <div class="mc-gwv" style="color:#003838">66</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#003838" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#003838"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-bad">© Thiago · 4pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">4 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">100 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">7.8M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#5c1a00">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#005f5f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">AP</div>
+        <div class="mc-id">
+          <div class="mc-name">Amogh Poudyal</div>
+          <div class="mc-team">torilaure fc</div>
+        </div>
+        <div class="mc-gwv" style="color:#5c1a00">45</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,5.00 175.00,35.00" fill="none" stroke="#5c1a00" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="35.00" r="3" fill="#5c1a00"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© Palmer · 14pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">19 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">94 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">8.3M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#1a4a00">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#1a5c1a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">SP</div>
+        <div class="mc-id">
+          <div class="mc-name">Shiva Poudel</div>
+          <div class="mc-team">The Red Religion</div>
+        </div>
+        <div class="mc-gwv" style="color:#1a4a00">47</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,35.00 175.00,5.00" fill="none" stroke="#1a4a00" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="5.00" r="3" fill="#1a4a00"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-good">© Mbeumo · 22pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">13 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">92 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">8.3M</span></div>
+      </div>
+    </div>
+    <div class="mc" style="border-top-color:#00286b">
+      <div class="mc-top">
+        <div style="width:44px;height:44px;border-radius:50%;background:#8b0000;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;">SG</div>
+        <div class="mc-id">
+          <div class="mc-name">Saugat Ghimire</div>
+          <div class="mc-team">Pure Luck FC</div>
+        </div>
+        <div class="mc-gwv" style="color:#00286b">41</div>
+      </div>
+      <div class="mc-tags"></div>
+      <div class="mc-spark"><svg width="180" height="40" viewBox="0 0 180 40"><polyline points="5.00,5.00 175.00,35.00" fill="none" stroke="#00286b" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="175.00" cy="35.00" r="3" fill="#00286b"/></svg></div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v cap-bad">© Watkins · 0pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">3 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">90 pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">8.4M</span></div>
+      </div>
+    </div></div>
+</section>
+<section class="np-section">
+  <div class="np-section-head">
+    <span class="np-head-rule"></span>
+    <span class="np-head-title">LEAGUE INTEL</span>
+    <span class="np-head-rule"></span>
+  </div>
+  <div class="intel-grid">
+    <div class="intel-panel">
+      <div class="intel-panel-head">POWER RANKINGS <span class="intel-note">form-weighted</span></div>
+      
+    <div class="intel-row">
+      <span class="intel-rank">#1</span>
+      <span class="intel-name">Ballav Aryal</span>
+      <span class="intel-val">90.5</span>
+      <span class="mv-flat">—</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-rank">#2</span>
+      <span class="intel-name">Abodh Poudyal</span>
+      <span class="intel-val">80.5</span>
+      <span class="mv-flat">—</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-rank">#3</span>
+      <span class="intel-name">Rajan Adhikari</span>
+      <span class="intel-val">78.5</span>
+      <span class="mv-flat">—</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-rank">#4</span>
+      <span class="intel-name">Santosh Shiwakoti</span>
+      <span class="intel-val">78.5</span>
+      <span class="mv-flat">—</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-rank">#5</span>
+      <span class="intel-name">Bikal Pudasaini</span>
+      <span class="intel-val">76.5</span>
+      <span class="mv-flat">—</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-rank">#6</span>
+      <span class="intel-name">White Fang</span>
+      <span class="intel-val">76.0</span>
+      <span class="mv-flat">—</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-rank">#7</span>
+      <span class="intel-name">Nilam Dahal</span>
+      <span class="intel-val">72.5</span>
+      <span class="mv-flat">—</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-rank">#8</span>
+      <span class="intel-name">Ashish Shrestha</span>
+      <span class="intel-val">69.5</span>
+      <span class="mv-flat">—</span>
+    </div>
+    </div>
+    <div class="intel-panel">
+      <div class="intel-panel-head">CAPTAINCY TRENDS</div>
+      
+    <div class="ct-row">
+      <div class="ct-name">Haaland</div>
+      <div class="ct-bar-wrap"><div class="ct-bar" style="width:100%"></div></div>
+      <div class="ct-meta">33% · 26pts</div>
+    </div>
+    <div class="ct-row">
+      <div class="ct-name">B.Fernandes</div>
+      <div class="ct-bar-wrap"><div class="ct-bar" style="width:80%"></div></div>
+      <div class="ct-meta">27% · 46pts</div>
+    </div>
+    <div class="ct-row">
+      <div class="ct-name">Havertz</div>
+      <div class="ct-bar-wrap"><div class="ct-bar" style="width:20%"></div></div>
+      <div class="ct-meta">7% · 4pts</div>
+    </div>
+    <div class="ct-row">
+      <div class="ct-name">João Pedro</div>
+      <div class="ct-bar-wrap"><div class="ct-bar" style="width:20%"></div></div>
+      <div class="ct-meta">7% · 18pts</div>
+    </div>
+    <div class="ct-row">
+      <div class="ct-name">Thiago</div>
+      <div class="ct-bar-wrap"><div class="ct-bar" style="width:20%"></div></div>
+      <div class="ct-meta">7% · 4pts</div>
+    </div>
+    </div>
+    <div class="intel-panel">
+      <div class="intel-panel-head">CLOSEST RIVALRIES</div>
+      
+    <div class="rv-row">
+      <span class="rv-a">Ballav Aryal</span>
+      <span class="rv-gap">+20pts ahead</span>
+      <span class="rv-b">Abodh Poudyal</span>
+    </div>
+    <div class="rv-row">
+      <span class="rv-a">Abodh Poudyal</span>
+      <span class="rv-gap">+4pts ahead</span>
+      <span class="rv-b">Rajan Adhikari</span>
+    </div>
+    <div class="rv-row">
+      <span class="rv-a">Rajan Adhikari</span>
+      <span class="rv-gap">+0pts ahead</span>
+      <span class="rv-b">Santosh Shiwakoti</span>
+    </div>
+    <div class="rv-row">
+      <span class="rv-a">Santosh Shiwakoti</span>
+      <span class="rv-gap">+4pts ahead</span>
+      <span class="rv-b">Bikal Pudasaini</span>
+    </div>
+    <div class="rv-row">
+      <span class="rv-a">Bikal Pudasaini</span>
+      <span class="rv-gap">+1pts ahead</span>
+      <span class="rv-b">White Fang</span>
+    </div>
+    </div>
+  </div>
+</section>
+<footer class="np-footer">
+  <div class="footer-rule"></div>
+  <div class="footer-inner">
+    <span>Pullman Football Samaj · Gameweek 2</span>
+    <span class="footer-right">Generated 2026-09-01 01:55 · FPL Spy automated report</span>
+  </div>
+</footer></div>
+</body></html>
