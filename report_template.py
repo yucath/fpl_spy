@@ -589,11 +589,12 @@ def _captain_picks(managers: List[dict], manager_photos: dict) -> str:
 <div class="cap-list">{''.join(rows)}</div>"""
 
 
-def _sidebar(managers: List[dict], manager_photos: dict) -> str:
+def _sidebar(managers: List[dict], manager_photos: dict, league: dict = None) -> str:
     return f"""
 <aside class="sidebar">
   <div class="sb-section">{_league_table(managers, manager_photos)}</div>
   <div class="sb-section">{_captain_picks(managers, manager_photos)}</div>
+  {_sidebar_extras(managers, league or {})}
 </aside>"""
 
 
@@ -711,6 +712,76 @@ def _race_section(managers: List[dict]) -> str:
   <div class="chart-wrap">{svg}</div>
   <div class="img-caption">Mini-league position after each gameweek &middot; 1st place at top</div>
 </section>"""
+
+
+def _sidebar_extras(managers: List[dict], league: dict) -> str:
+    """Extra sidebar blocks: weekly wins record + GW form table."""
+    sections = []
+
+    # Weekly wins table
+    weekly_wins = (league.get("weekly_wins") or [])
+    winners = [w for w in weekly_wins if (w.get("wins") or 0) >= 1]
+    if winners:
+        rows = ""
+        for w in sorted(winners, key=lambda x: -x.get("wins", 0))[:8]:
+            weeks_str = ", ".join(f"GW{n}" for n in (w.get("weeks") or []))
+            rows += (
+                f'<tr><td class="lt-nm">{esc(w["name"])}</td>'
+                f'<td class="lt-num" style="color:{HEADLINE}">{int(w["wins"])}</td>'
+                f'<td style="font-size:10px;color:{MUTED};text-align:left;padding-left:4px">{esc(weeks_str)}</td></tr>'
+            )
+        sections.append(f"""
+<div class="sb-head">WEEKLY WINS</div>
+<table class="lt">
+  <thead><tr><th style="text-align:left">Manager</th><th class="lt-num">W</th><th></th></tr></thead>
+  <tbody>{rows}</tbody>
+</table>""")
+
+    # GW form — last 3 GWs, show pts per GW for each manager
+    form_rows = ""
+    for m in managers[:10]:
+        pts_series = (m.get("season") or {}).get("net_points") or []
+        gw_series  = (m.get("season") or {}).get("gws") or []
+        recent = pts_series[-3:] if len(pts_series) >= 3 else pts_series
+        if not recent:
+            continue
+        dots = ""
+        for p in recent:
+            col = HEADLINE if p >= 80 else ("#1a5c1a" if p >= 60 else MUTED)
+            dots += f'<span style="color:{col};font-weight:700;margin-right:3px">{int(p)}</span>'
+        form_rows += (
+            f'<div style="display:flex;justify-content:space-between;align-items:center;'
+            f'padding:3px 0;border-bottom:1px solid {RULE};font-size:11.5px">'
+            f'<span style="color:{INK};font-weight:600">{esc(m.get("name","").split()[0])}</span>'
+            f'<span style="font-family:\'Courier New\',monospace">{dots}</span>'
+            f'</div>'
+        )
+    if form_rows:
+        sections.append(f"""
+<div class="sb-head">RECENT FORM <span style="font-weight:400;font-size:9px">(last 3 GWs)</span></div>
+{form_rows}""")
+
+    # Bench leaderboard — top 5 bench wasters
+    bench_lb = (league.get("bench_leaderboard") or [])[:5]
+    if bench_lb:
+        b_rows = ""
+        for i, b in enumerate(bench_lb):
+            alt = f' style="background:{TALT}"' if i % 2 == 1 else ""
+            b_rows += (
+                f'<tr{alt}><td class="lt-nm">{esc(b["name"])}</td>'
+                f'<td class="lt-num" style="color:{HEADLINE}">{fnum(b.get("season_bench"))}</td>'
+                f'<td class="lt-gw">{fnum(b.get("gw_bench"))}</td></tr>'
+            )
+        sections.append(f"""
+<div class="sb-head">BENCH POINTS WASTED</div>
+<table class="lt">
+  <thead><tr><th style="text-align:left">Manager</th><th class="lt-num">Total</th><th class="lt-gw">GW</th></tr></thead>
+  <tbody>{b_rows}</tbody>
+</table>""")
+
+    if not sections:
+        return ""
+    return "\n".join(f'<div class="sb-section">{s}</div>' for s in sections)
 
 
 def _intel(league: dict) -> str:
@@ -952,7 +1023,7 @@ def render_report_html(payload: dict) -> str:
     {_hero(payload, managers, manager_photos)}
     {_talking_points(payload, managers)}
   </div>
-  {_sidebar(managers, manager_photos)}
+  {_sidebar(managers, manager_photos, league)}
 </div>""",
         _stats_strip(managers, league),
         _manager_dossiers(managers, manager_photos),

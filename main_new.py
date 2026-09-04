@@ -3190,17 +3190,27 @@ def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: 
             status_line = f"GW{gameweek} FINAL — all {total_fixtures} fixtures done."
             task = (
                 f"Write a FINAL match report for GW{gameweek} — structured EXACTLY as follows:\n\n"
-                "HEADLINE (1 sentence, all-caps, punchy)\n\n"
-                "THE STORY (3-4 paragraphs, ~200 words total): Crown the GW winner, highlight the biggest "
-                "individual storylines (captaincy, transfers, bench disasters), reference the OVERALL league "
-                "standings and who is making a title charge vs who is in freefall. Weave in context from "
-                "previous weeks where relevant — recurring patterns, redemption arcs, serial underperformers.\n\n"
+                "HEADLINE (1 sentence, all-caps, punchy and specific to this GW's biggest story)\n\n"
+                "THE STORY (5-6 paragraphs, ~350 words total): This is the centrepiece — write it like a "
+                "real sports journalist covering a match. Tell the story of the WHOLE gameweek:\n"
+                "  Para 1 — How GW opened: who was leading early, which captains looked smart on Friday/Saturday, "
+                "what the early mood in the league was.\n"
+                "  Para 2 — The mid-week swing: which results changed everything, which managers were climbing "
+                "or crashing as fixtures ticked off. Name actual players and their hauls.\n"
+                "  Para 3 — The decisive moments: the captain call that won the week, the bench disaster that "
+                "cost someone, the differential pick that nobody saw coming. Be specific — real player names, "
+                "real points.\n"
+                "  Para 4 — Where it left the OVERALL standings: who is making a title charge, who is in danger "
+                "at the bottom, which rivalries are heating up. Reference the previous week's winner if relevant.\n"
+                "  Para 5/6 — Context and patterns: call out recurring themes (managers who always blank on "
+                "captains, serial bench wasters, the overachiever on form). Make it feel like you know these "
+                "people across the whole season, not just this week.\n\n"
                 "MANAGER VERDICTS (one line per manager, cover ALL managers in the league): "
-                "For each manager write a single sentence — one punch or praise that captures their GW in a "
-                "nutshell. Format exactly as: [FIRST NAME]: [verdict]. Be specific (captain picks, transfers, "
-                "bench pts, position changes). Alternate punches and praises naturally.\n\n"
-                "NEXT WEEK TEASER (1 punchy sentence about what to watch for GW{gw_next}).\n\n"
-                "Total output: 350-450 words. FINAL results — you can be completely definitive."
+                "Format exactly as: [FIRST NAME]: [verdict]. One punchy sentence each — be specific about "
+                "what they did THIS week (captain pick, a transfer, bench pts, rank change). Alternate tone: "
+                "some glowing praise, some gentle roasting, none bland.\n\n"
+                "NEXT WEEK TEASER (1 punchy sentence teasing the GW{gw_next} storylines).\n\n"
+                "Total output: 500-600 words. FINAL results — be completely definitive and confident."
             ).replace("{gw_next}", str(gameweek + 1))
         else:
             # Spell out the fixture state in plain English so the AI can't misread it
@@ -3222,19 +3232,23 @@ def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: 
             task = (
                 f"Write a LIVE match-day update for GW{gameweek} — structured EXACTLY as follows:\n\n"
                 "HEADLINE (1 sentence, all-caps, captures the drama so far)\n\n"
-                "THE STORY (3-4 paragraphs, ~200 words): "
-                f"Be honest about how early/late we are ({fixture_state}). "
-                f"Hype current leaders but flag that {fixtures_not_started} game(s) are still to come. "
-                "Flag managers whose captain/key players haven't played yet — they could swing the week dramatically. "
-                "Reference the OVERALL standings: who's been consistent, who's been climbing, who's in crisis. "
-                "IMPORTANT: a player showing 0pts may have ALREADY PLAYED and blanked — check squad play status. "
-                "Build genuine suspense.\n\n"
+                "THE STORY (5-6 paragraphs, ~350 words): Tell the story of the gameweek SO FAR:\n"
+                f"  Para 1 — How GW{gameweek} opened: who looked sharp in early fixtures, which captains "
+                "were already paying off or bombing.\n"
+                "  Para 2 — The mid-week picture: who is leading right now and why, which results changed things.\n"
+                "  Para 3 — Biggest storylines: a key captain pick, a differential that's working, a disaster in progress.\n"
+                "  Para 4 — Overall league context: how this GW is shifting the season standings, who needs a "
+                "big finish and who can afford to coast.\n"
+                "  Para 5 — The suspense: what's still to come, which managers have their key players yet to play, "
+                "and what could still flip the result.\n"
+                f"Be honest that {fixtures_not_started} fixture(s) remain and nothing is decided. "
+                "IMPORTANT: 0pts may mean ALREADY PLAYED AND BLANKED — check squad play status. "
+                "Build genuine suspense without declaring winners.\n\n"
                 "MANAGER VERDICTS (one line per manager, cover ALL managers in the league): "
-                "For each manager, write a single-sentence verdict on their GW so far. "
-                "Format exactly as: [FIRST NAME]: [verdict]. Flag managers whose big players haven't played yet "
-                "(use 'watch this space' tone). Be specific. Do NOT declare anyone a winner or loser yet.\n\n"
-                "SUSPENSE CLOSER (1 sentence about the biggest question mark heading into the remaining fixtures).\n\n"
-                "Total output: 350-450 words. Do NOT declare final winners — this is mid-gameweek drama."
+                "Format exactly as: [FIRST NAME]: [verdict]. Be specific about what they've done so far. "
+                "Flag managers with key players still to play — use 'watch this space' energy.\n\n"
+                "SUSPENSE CLOSER (1 sentence about the biggest unanswered question).\n\n"
+                "Total output: 500-600 words. Do NOT declare final winners."
             )
 
         all_ctx = "\n\n".join(filter(None, [
@@ -3284,7 +3298,7 @@ TONE: You are the funniest, most insightful person in a WhatsApp group of footba
                 )},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
+            max_tokens=1400,
             temperature=0.88
         )
         
