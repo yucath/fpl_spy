@@ -154,6 +154,18 @@ def get_gameweek_status(gameweek: int) -> Dict:
         is_finished = gw_event.get('finished', False) if gw_event else (finished_fixtures == total_fixtures)
         is_started = gw_event.get('data_checked', False) if gw_event else (started_fixtures > 0)
 
+        # First and last kickoff times for day-count context
+        kickoff_times = []
+        for f in fixtures:
+            ko = f.get('kickoff_time')
+            if ko:
+                try:
+                    kickoff_times.append(datetime.strptime(ko, '%Y-%m-%dT%H:%M:%SZ'))
+                except Exception:
+                    pass
+        first_kickoff = min(kickoff_times) if kickoff_times else None
+        last_kickoff = max(kickoff_times) if kickoff_times else None
+
         return {
             'is_finished': is_finished,
             'is_started': is_started,
@@ -163,7 +175,9 @@ def get_gameweek_status(gameweek: int) -> Dict:
             'fixtures_not_started': not_started_fixtures,
             'fixtures_in_progress': in_progress,
             'deadline_time': gw_event.get('deadline_time', '') if gw_event else '',
-            'gw_name': gw_event.get('name', f'Gameweek {gameweek}') if gw_event else f'Gameweek {gameweek}'
+            'gw_name': gw_event.get('name', f'Gameweek {gameweek}') if gw_event else f'Gameweek {gameweek}',
+            'first_kickoff': first_kickoff,
+            'last_kickoff': last_kickoff,
         }
     except Exception as e:
         logger.error(f"Error getting gameweek status: {e}")
@@ -176,7 +190,9 @@ def get_gameweek_status(gameweek: int) -> Dict:
             'fixtures_not_started': 10,
             'fixtures_in_progress': 0,
             'deadline_time': '',
-            'gw_name': f'Gameweek {gameweek}'
+            'gw_name': f'Gameweek {gameweek}',
+            'first_kickoff': None,
+            'last_kickoff': None,
         }
 
 def retrieve_mini_league_data(league_id, gameweek):
@@ -3970,13 +3986,31 @@ def main(args):
         _live = gw_status.get('fixtures_in_progress', 0)
         _tot = gw_status.get('total_fixtures', 10)
         _rem = _tot - _fin - _live
+
+        # Days elapsed since GW started / days until last game
+        _now_utc = datetime.utcnow()
+        _first_ko = gw_status.get('first_kickoff')  # datetime (UTC, naive)
+        _last_ko  = gw_status.get('last_kickoff')
+        _day_lines = []
+        if _first_ko:
+            _days_in = max(0, (_now_utc - _first_ko).days)
+            _day_lines.append(f"Day {_days_in + 1} of GW{gameweek}")
+        if _last_ko and _last_ko > _now_utc:
+            _hrs_left = int((_last_ko - _now_utc).total_seconds() / 3600)
+            if _hrs_left >= 24:
+                _day_lines.append(f"{_hrs_left // 24}d {_hrs_left % 24}h until last game")
+            else:
+                _day_lines.append(f"{_hrs_left}h until last game")
+
         if _fin == 0 and _live == 0:
             _status_tag = f"0/{_tot} games played"
         elif _live > 0:
             _status_tag = f"{_fin}/{_tot} done · {_live} live · {_rem} left"
         else:
             _status_tag = f"{_fin}/{_tot} games done · {_rem} remaining"
-        header = f"🏁 GW{gameweek} — {_status_tag}"
+
+        day_ctx = " · ".join(_day_lines)
+        header = f"🏁 GW{gameweek}{' — ' + day_ctx if day_ctx else ''}\n{_status_tag}"
         sections.append(header + "\n" + "\n".join(rows))
 
     # --- Highlights (fun facts) — only show if player has actually played ---

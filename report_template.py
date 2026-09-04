@@ -121,6 +121,11 @@ def _parse_narrative(narrative: str):
     if ":" in raw_head[:10]:
         raw_head = raw_head.split(":", 1)[1].strip()
     raw_head = raw_head.rstrip("!")
+    # If the first line looks like a full sentence (long or has a full stop), treat
+    # it as body text and synthesise a short headline from the first few words.
+    if len(raw_head) > 80 or ("." in raw_head and len(raw_head) > 40):
+        words = raw_head.split()
+        raw_head = " ".join(words[:6]).rstrip(".,;:") + "…"
 
     section = "story"
     story_paras, verdicts, teaser_lines = [], [], []
@@ -338,8 +343,8 @@ def _masthead(meta: dict) -> str:
       <div class="mast-season">SEASON {season}</div>
     </div>
     <div class="mast-center">
-      <div class="mast-gazette">{league}</div>
-      <div class="mast-league">THE GAZETTE</div>
+      <div class="mast-league">{league}</div>
+      <div class="mast-gazette">THE GAZETTE</div>
     </div>
     <div class="mast-side mast-right">
       <div>{date_str}</div>
@@ -1088,11 +1093,11 @@ body {{
 .mast-center {{ text-align: center; }}
 .mast-league {{
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 64px; font-weight: 900; letter-spacing: -2px;
+  font-size: 52px; font-weight: 900; letter-spacing: -1.5px;
   line-height: 1; color: {INK}; text-transform: uppercase;
 }}
 .mast-gazette {{
-  font-size: 10px; letter-spacing: 5px; color: {MUTED}; margin-bottom: 2px;
+  font-size: 11px; letter-spacing: 6px; color: {MUTED}; margin-top: 4px;
   text-transform: uppercase; font-family: 'Source Serif 4', Georgia, serif;
 }}
 
