@@ -55,21 +55,23 @@ def send_message(thread_id):
             print("No message content found")
             return False
 
-        # Find PDF file
-        file_paths = os.listdir(os.path.join(current_dir, 'plots'))
-        pdf_files = [f for f in file_paths if f.endswith('.pdf')]
-        if not pdf_files:
-            print("No PDF file found")
+        # Attach the newest infographic PNG (report_gw*.png). The old pipeline
+        # attached a PDF from plots/; we now post the single tall image.
+        report_pngs = [
+            os.path.join(current_dir, f)
+            for f in os.listdir(current_dir)
+            if f.startswith('report_gw') and f.endswith('.png')
+        ]
+        if not report_pngs:
+            print("No report image (report_gw*.png) found")
             return False
-            
-        pdf_file = pdf_files[0]
-        pdf_path = os.path.join(current_dir, 'plots', pdf_file)
+        image_path = max(report_pngs, key=os.path.getmtime)
 
-        # Send as a single message with attachment
+        # Send as a single message with the infographic attached
         success = fb.send_message(
             thread_id=thread_id,
             message=message_txt,
-            file_path=pdf_path
+            file_path=image_path
         )
         return success
     except Exception as e:
@@ -83,7 +85,11 @@ def main():
     parser = argparse.ArgumentParser(description='Send messages to Facebook thread')
     parser.add_argument('--thread', type=str, required=False, help='Facebook thread ID')
     args = parser.parse_args()
-    args.thread = os.getenv('FANTASY_GROUP_ID')
+    # FB Messenger thread to post to. NOTE: FANTASY_GROUP_ID now holds the FPL
+    # league id (used for analysis), NOT a Facebook thread. Set FB_THREAD_ID to
+    # the real Messenger group id; fall back to FAMILY_GROUP_ID.
+    if not args.thread:
+        args.thread = os.getenv('FB_THREAD_ID') or os.getenv('FAMILY_GROUP_ID')
     
     # Setup logging
     local_dir = os.path.dirname(os.path.realpath(__file__))

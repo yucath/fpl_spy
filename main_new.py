@@ -87,6 +87,46 @@ def fetch_fixtures(gameweek: int = None) -> list:
         url += f"?event={gameweek}"
     return fetch_data(url)
 
+def build_play_status_map(gameweek: int, players_data: List[Dict]) -> Dict[int, str]:
+    """
+    Map each player_id -> play status for this gameweek:
+      'finished'  -> all of the player's team fixtures are done (points final)
+      'playing'   -> a fixture has kicked off but isn't finished yet
+      'upcoming'  -> the player's team hasn't started yet (points still 0/provisional)
+
+    Handles double gameweeks (a team is 'playing' until ALL its fixtures finish).
+    Used to avoid, e.g., flagging a "captain fail" for a captain who hasn't
+    kicked off yet.
+    """
+    fixtures = fetch_fixtures(gameweek) or []
+
+    team_started: Dict[int, bool] = {}
+    team_all_finished: Dict[int, bool] = {}
+    for fx in fixtures:
+        started = bool(fx.get('started'))
+        finished = bool(fx.get('finished') or fx.get('finished_provisional'))
+        for team in (fx.get('team_h'), fx.get('team_a')):
+            if team is None:
+                continue
+            team_started[team] = team_started.get(team, False) or started
+            # all_finished stays True only if every fixture for the team is finished
+            prev = team_all_finished.get(team, True)
+            team_all_finished[team] = prev and finished
+
+    status_map: Dict[int, str] = {}
+    for p in players_data:
+        team = p.get('team')
+        if team not in team_started:
+            status_map[p['id']] = 'upcoming'
+        elif team_all_finished.get(team, False):
+            status_map[p['id']] = 'finished'
+        elif team_started.get(team, False):
+            status_map[p['id']] = 'playing'
+        else:
+            status_map[p['id']] = 'upcoming'
+    return status_map
+
+
 def get_gameweek_status(gameweek: int) -> Dict:
     """
     Get the status of a gameweek including fixtures finished/remaining.
@@ -108,17 +148,19 @@ def get_gameweek_status(gameweek: int) -> Dict:
         started_fixtures = sum(1 for f in fixtures if f.get('started', False))
         remaining_fixtures = total_fixtures - finished_fixtures
         in_progress = started_fixtures - finished_fixtures
-        
+        not_started_fixtures = total_fixtures - started_fixtures  # truly not yet kicked off
+
         # Determine gameweek status
         is_finished = gw_event.get('finished', False) if gw_event else (finished_fixtures == total_fixtures)
         is_started = gw_event.get('data_checked', False) if gw_event else (started_fixtures > 0)
-        
+
         return {
             'is_finished': is_finished,
             'is_started': is_started,
             'total_fixtures': total_fixtures,
             'fixtures_finished': finished_fixtures,
             'fixtures_remaining': remaining_fixtures,
+            'fixtures_not_started': not_started_fixtures,
             'fixtures_in_progress': in_progress,
             'deadline_time': gw_event.get('deadline_time', '') if gw_event else '',
             'gw_name': gw_event.get('name', f'Gameweek {gameweek}') if gw_event else f'Gameweek {gameweek}'
@@ -131,6 +173,7 @@ def get_gameweek_status(gameweek: int) -> Dict:
             'total_fixtures': 10,
             'fixtures_finished': 0,
             'fixtures_remaining': 10,
+            'fixtures_not_started': 10,
             'fixtures_in_progress': 0,
             'deadline_time': '',
             'gw_name': f'Gameweek {gameweek}'
@@ -268,7 +311,10 @@ def plot_league_standings(mini_league_data: Dict, gameweek: int) -> None:
 def plot_weekly_points(mini_league_data: Dict) -> None:
     """Plot the weekly points for each manager in the league."""
     # Set style for better visibility
-    plt.style.use('seaborn')
+    try:
+        plt.style.use('seaborn-v0_8-darkgrid')  # 'seaborn' was removed in matplotlib>=3.6
+    except OSError:
+        pass
     plt.figure(figsize=(15, 10))
     
     # Create more distinctive color palette
@@ -990,9 +1036,19 @@ def calculate_interesting_stats(mini_league_data: Dict, player_id_to_name: Dict,
     
     return stats
 
-def calculate_weekly_fun_facts(mini_league_data: Dict, gameweek: int, player_id_to_name: Dict, player_id_to_points: Dict) -> Dict:
-    """Calculate fun weekly facts and 'burns' for the current gameweek."""
+def calculate_weekly_fun_facts(mini_league_data: Dict, gameweek: int, player_id_to_name: Dict, player_id_to_points: Dict, play_status: Dict = None) -> Dict:
+    """Calculate fun weekly facts and 'burns' for the current gameweek.
+
+    play_status (optional): {player_id: 'finished'|'playing'|'upcoming'}. When
+    provided, results that depend on a player having actually played (captain
+    fail, bench hero, differential) only trigger once that player has finished,
+    so we don't call a "fail" on someone who hasn't kicked off yet.
+    """
     fun_facts = {}
+
+    def _finished(pid):
+        # Without status info, assume finished (backwards compatible).
+        return play_status is None or play_status.get(pid) == 'finished'
     
     # Track rank movements
     rank_movements = []
@@ -1054,9 +1110,9 @@ def calculate_weekly_fun_facts(mini_league_data: Dict, gameweek: int, player_id_
             captain_id = captain_pick['element']
             captain_points = player_id_to_points.get(captain_id, 0) * captain_pick.get('multiplier', 1)
             captain_name = player_id_to_name.get(captain_id, 'Unknown')
-            
-            # Captain fail (2 points or less)
-            if captain_points <= 2:
+
+            # Captain fail (2 points or less) - only once the captain has played
+            if captain_points <= 2 and _finished(captain_id):
                 captain_fails.append({
                     'manager': manager_name,
                     'captain': captain_name,
@@ -1068,7 +1124,7 @@ def calculate_weekly_fun_facts(mini_league_data: Dict, gameweek: int, player_id_
         for bench_pick in bench_players:
             player_id = bench_pick['element']
             points = player_id_to_points.get(player_id, 0)
-            if points >= 8:  # Significant points on bench
+            if points >= 8 and _finished(player_id):  # Significant points on bench
                 bench_heroes.append({
                     'manager': manager_name,
                     'player': player_id_to_name.get(player_id, 'Unknown'),
@@ -1084,7 +1140,7 @@ def calculate_weekly_fun_facts(mini_league_data: Dict, gameweek: int, player_id_
                           if any(p['element'] == player_id for p in m['gameweek_data'].get(str(gameweek), {}).get('picks', [])))
             ownership_pct = (ownership / total_managers) * 100
             
-            if ownership_pct <= 33 and points >= 10:  # Low ownership, high points
+            if ownership_pct <= 33 and points >= 10 and _finished(player_id):  # Low ownership, high points
                 differential_heroes.append({
                     'manager': manager_name,
                     'player': player_id_to_name.get(player_id, 'Unknown'),
@@ -1298,7 +1354,10 @@ def plot_transfer_effectiveness(mini_league_data: Dict, gameweek: int, player_id
     from typing import Dict, List
     
     # Set style
-    plt.style.use('seaborn')
+    try:
+        plt.style.use('seaborn-v0_8-darkgrid')  # 'seaborn' was removed in matplotlib>=3.6
+    except OSError:
+        pass
     
     # Create a larger figure
     plt.figure(figsize=(16, 10))
@@ -2112,8 +2171,9 @@ def add_player_stats_to_table(text: List[str], stats: Dict) -> List[str]:
 
 
 
-def gather_rich_insights_data(mini_league_data: Dict, gameweek: int, current_scores: List, 
-                               player_id_to_name: Dict = None, player_id_to_points: Dict = None) -> Dict:
+def gather_rich_insights_data(mini_league_data: Dict, gameweek: int, current_scores: List,
+                               player_id_to_name: Dict = None, player_id_to_points: Dict = None,
+                               play_status: Dict = None) -> Dict:
     """Gather comprehensive data for AI insights including historical trends, player performance, and rivalries."""
     insights_data = {}
     managers = mini_league_data['standings']['results']
@@ -2298,25 +2358,36 @@ def gather_rich_insights_data(mini_league_data: Dict, gameweek: int, current_sco
                 captain_total_pts = captain_base_pts * captain_pick.get('multiplier', 2)
                 captain_name = player_id_to_name.get(captain_id, 'Unknown')
                 
+                cap_play = (play_status or {}).get(captain_id, 'upcoming')
                 captain_results.append({
                     'manager': manager_name,
                     'captain': captain_name,
                     'points': captain_total_pts,
                     'base_points': captain_base_pts,
-                    'is_fail': captain_base_pts <= 2,
-                    'is_haul': captain_base_pts >= 10
+                    'play_status': cap_play,
+                    # Only a fail/haul if the match is actually finished
+                    'is_fail': captain_base_pts <= 2 and cap_play == 'finished',
+                    'is_haul': captain_base_pts >= 10 and cap_play == 'finished',
                 })
-        
+
         if captain_results:
             insights_data['captain_results'] = sorted(captain_results, key=lambda x: x['points'], reverse=True)
-            insights_data['best_captain'] = insights_data['captain_results'][0]
-            insights_data['worst_captain'] = insights_data['captain_results'][-1]
-            
-            # Captain fails (2 or less base points)
+            # best/worst only from finished captains to avoid misleading interim scores
+            finished_caps = [c for c in captain_results if c['play_status'] == 'finished']
+            insights_data['best_captain'] = (
+                max(finished_caps, key=lambda x: x['points']) if finished_caps
+                else insights_data['captain_results'][0]
+            )
+            insights_data['worst_captain'] = (
+                min(finished_caps, key=lambda x: x['points']) if finished_caps
+                else insights_data['captain_results'][-1]
+            )
+
+            # Captain fails only for captains who have actually played
             captain_fails = [c for c in captain_results if c['is_fail']]
             insights_data['captain_fails'] = captain_fails
-            
-            # Captain hauls (10+ base points)
+
+            # Captain hauls (10+ base points, finished only)
             captain_hauls = [c for c in captain_results if c['is_haul']]
             insights_data['captain_hauls'] = captain_hauls
     
@@ -2427,9 +2498,588 @@ def gather_rich_insights_data(mini_league_data: Dict, gameweek: int, current_sco
     return insights_data
 
 
+def build_yet_to_play_context(mini_league_data: Dict, gameweek: int, play_status: Dict,
+                              player_id_to_name: Dict, player_id_to_points: Dict) -> str:
+    """Per-manager summary of starting XI players still to play / mid-match,
+    plus the captain's live state. Lets the pundit be accurate mid-gameweek."""
+    if not play_status:
+        return ""
+    lines = []
+    for m in mini_league_data['standings']['results']:
+        picks = m.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])
+        starters = [p for p in picks if p['position'] <= 11]
+        yet = [p for p in starters if play_status.get(p['element']) == 'upcoming']
+        live = [p for p in starters if play_status.get(p['element']) == 'playing']
+        cap = next((p for p in picks if p.get('is_captain')), None)
+        cap_state = play_status.get(cap['element']) if cap else None
+        cap_name = player_id_to_name.get(cap['element'], 'Unknown') if cap else 'N/A'
+        if yet or live or cap_state in ('upcoming', 'playing'):
+            note = []
+            if yet:
+                names = ", ".join(player_id_to_name.get(p['element'], '?') for p in yet[:3])
+                note.append(f"{len(yet)} still to play ({names})")
+            if live:
+                note.append(f"{len(live)} mid-match")
+            if cap_state in ('upcoming', 'playing'):
+                note.append(f"captain {cap_name} {'yet to play' if cap_state == 'upcoming' else 'still playing'}")
+            lines.append(f"- {m['entry_name']}: " + "; ".join(note))
+    if not lines:
+        return ""
+    return "\n=== STILL TO PLAY (points are provisional) ===\n" + "\n".join(lines[:8])
+
+
+def build_squad_play_status_context(mini_league_data: Dict, gameweek: int, play_status: Dict,
+                                    player_id_to_name: Dict, player_id_to_points: Dict) -> str:
+    """Per-manager starting-XI play status — makes it explicit who has played (even 0pts)."""
+    if not play_status:
+        return ""
+    CHIP_LABELS = {'3xc': 'TRIPLE CAP', 'bboost': 'BENCH BOOST', 'freehit': 'FREE HIT', 'wildcard': 'WILDCARD'}
+    lines = []
+    for m in mini_league_data['standings']['results']:
+        gw_data = m.get('gameweek_data', {}).get(str(gameweek), {})
+        picks = gw_data.get('picks', [])
+        starters = [p for p in picks if p['position'] <= 11]
+
+        finished = [p for p in starters if play_status.get(p['element']) == 'finished']
+        live = [p for p in starters if play_status.get(p['element']) == 'playing']
+        upcoming = [p for p in starters if play_status.get(p['element']) == 'upcoming']
+
+        # Flag players who played but got 0 pts — these are NOT "yet to play"
+        zero_pts_played = [p for p in finished if player_id_to_points.get(p['element'], 0) == 0]
+
+        parts = [f"{len(finished)}/11 played"]
+        if live:
+            parts.append(f"{len(live)} live now")
+        if upcoming:
+            names = ", ".join(player_id_to_name.get(p['element'], '?') for p in upcoming[:3])
+            parts.append(f"{len(upcoming)} yet to play ({names}{'...' if len(upcoming) > 3 else ''})")
+        if zero_pts_played:
+            zero_names = ", ".join(player_id_to_name.get(p['element'], '?') for p in zero_pts_played[:2])
+            parts.append(f"PLAYED BUT 0pts: {zero_names}")
+
+        chip = gw_data.get('active_chip')
+        chip_str = f" | CHIP: {CHIP_LABELS.get(chip, chip.upper())}" if chip else ""
+        lines.append(f"- {m['entry_name']}: " + " | ".join(parts) + chip_str)
+
+    if not lines:
+        return ""
+    return "\n=== SQUAD PLAY STATUS (critical: do not assume 0pts = not played) ===\n" + "\n".join(lines)
+
+
+def build_captain_context(mini_league_data: Dict, gameweek: int, players_data: List,
+                          player_id_to_name: Dict, player_id_to_points: Dict,
+                          play_status: Dict = None) -> str:
+    """Who captained whom + their real GW return and play status.
+    Status is critical — never mock a captain who hasn't kicked off yet."""
+    if not players_data:
+        return ""
+    by_id = {p['id']: p for p in players_data}
+    lines = []
+    for m in mini_league_data['standings']['results']:
+        picks = m.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])
+        cap = next((p for p in picks if p.get('is_captain')), None)
+        if not cap:
+            continue
+        pid = cap['element']
+        el = by_id.get(pid, {})
+        name = player_id_to_name.get(pid, 'Unknown')
+        gw_pts = player_id_to_points.get(pid, 0)
+        season_pts = el.get('total_points', 0)
+        form = el.get('form', '?')
+        if play_status:
+            status = play_status.get(pid, 'upcoming')
+            status_label = {
+                'finished': 'FINISHED - return is final',
+                'playing': 'CURRENTLY PLAYING - points may change',
+                'upcoming': 'HAS NOT PLAYED YET - do NOT judge this pick'
+            }.get(status, 'UNKNOWN')
+        else:
+            status_label = 'STATUS UNKNOWN'
+        lines.append(
+            f"- {m['entry_name']} captained {name} [{status_label}] "
+            f"(GW return so far: {gw_pts}pts | season: {season_pts}pts | form: {form})"
+        )
+    if not lines:
+        return ""
+    return "\n=== CAPTAIN PICKS ===\n" + "\n".join(lines)
+
+
+def build_full_standings_for_ai(gw_standings: List, mini_league_data: Dict,
+                                 play_status: Dict, player_id_to_name: Dict,
+                                 player_id_to_points: Dict, gameweek: int) -> str:
+    """Complete ranked GW standings table — AI must only use names/numbers from here."""
+    managers = mini_league_data['standings']['results']
+    overall_sorted = sorted(managers, key=lambda x: x.get('total', 0), reverse=True)
+    overall_rank_map = {m['entry_name']: i + 1 for i, m in enumerate(overall_sorted)}
+    by_name = {m['entry_name']: m for m in managers}
+
+    gw_avg = (sum(e.get('GW Points', e.get('points', 0)) for e in gw_standings) /
+               len(gw_standings)) if gw_standings else 0
+
+    lines = [f"(GW avg: {gw_avg:.0f}pts)"]
+    for rank, entry in enumerate(gw_standings, 1):
+        name = entry.get('manager', entry.get('Team Name', '?'))
+        gw_pts = entry.get('GW Points', entry.get('points', 0))
+        m_data = by_name.get(name, {})
+        season_total = m_data.get('total', 0)
+        overall_r = overall_rank_map.get(name, '?')
+        above_below = f"(+{gw_pts - gw_avg:.0f})" if gw_pts >= gw_avg else f"({gw_pts - gw_avg:.0f})"
+
+        picks = m_data.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])
+        cap = next((p for p in picks if p.get('is_captain')), None)
+        if cap:
+            cap_name = player_id_to_name.get(cap['element'], '?')
+            cap_pts = player_id_to_points.get(cap['element'], 0)
+            cap_status = (play_status or {}).get(cap['element'], 'upcoming')
+            cap_label = {'finished': '✓', 'playing': '⚡', 'upcoming': '⏳'}.get(cap_status, '?')
+            cap_str = f"C: {cap_name}{cap_label}({cap_pts}pts)"
+        else:
+            cap_str = "C: none"
+
+        lines.append(
+            f"#{rank}. {name} | {gw_pts}pts {above_below} | "
+            f"Season: {season_total}pts (#{overall_r} overall) | {cap_str}"
+        )
+    return "=== FULL GW STANDINGS ===\n" + "\n".join(lines)
+
+
+def build_league_captaincy_trends(mini_league_data: Dict, gameweek: int,
+                                   player_id_to_name: Dict, player_id_to_points: Dict,
+                                   play_status: Dict = None) -> str:
+    """Captain frequency + chip usage across the league this GW."""
+    managers = mini_league_data['standings']['results']
+    cap_counts: Dict = {}
+    chips_used = []
+
+    for m in managers:
+        gw_data = m.get('gameweek_data', {}).get(str(gameweek), {})
+        picks = gw_data.get('picks', [])
+        cap = next((p for p in picks if p.get('is_captain')), None)
+        if cap:
+            pid = cap['element']
+            cap_counts[pid] = cap_counts.get(pid, 0) + 1
+        # active_chip is at the top level of the picks API response, not inside entry_history
+        chip = gw_data.get('active_chip')
+        if chip:
+            chip_label = {'3xc': 'Triple Captain', 'bboost': 'Bench Boost',
+                          'freehit': 'Free Hit', 'wildcard': 'Wildcard'}.get(chip, chip)
+            chips_used.append(f"{m['entry_name']} ({chip_label})")
+
+    lines = []
+    if cap_counts:
+        sorted_caps = sorted(cap_counts.items(), key=lambda x: x[1], reverse=True)
+        top = [f"{player_id_to_name.get(pid, '?')} captained by {cnt}/{len(managers)}"
+               for pid, cnt in sorted_caps[:4]]
+        lines.append("Captaincy: " + " | ".join(top))
+    if chips_used:
+        lines.append("Chips: " + ", ".join(chips_used))
+
+    if not lines:
+        return ""
+    return "\n=== LEAGUE TRENDS ===\n" + "\n".join(lines)
+
+
+def build_rivalry_context(mini_league_data: Dict, gameweek: int,
+                           current_scores: List) -> str:
+    """Closest overall points gaps + who moved up/down this GW."""
+    managers = mini_league_data['standings']['results']
+    overall = sorted(managers, key=lambda x: x.get('total', 0), reverse=True)
+
+    gaps = []
+    for i in range(min(len(overall) - 1, 6)):
+        a, b = overall[i], overall[i + 1]
+        gap = a.get('total', 0) - b.get('total', 0)
+        gaps.append(f"{a['entry_name']} leads {b['entry_name']} by only {gap}pts" if gap <= 10
+                    else f"{a['entry_name']} +{gap} ahead of {b['entry_name']}")
+
+    score_map = {s.get('manager'): s.get('points', 0) for s in current_scores}
+    moves = []
+    for m in managers:
+        name = m['entry_name']
+        curr_r = m.get('rank', 0)
+        gw_pts = score_map.get(name, 0)
+        prev_total = m.get('total', 0) - gw_pts
+        if prev_total < 0:
+            continue
+        prev_rank_list = sorted(
+            managers,
+            key=lambda x: x.get('total', 0) - score_map.get(x['entry_name'], 0),
+            reverse=True
+        )
+        prev_r = next((i + 1 for i, x in enumerate(prev_rank_list)
+                       if x['entry_name'] == name), curr_r)
+        delta = prev_r - curr_r
+        if delta >= 2:
+            moves.append(f"{name} climbed {delta} spots")
+        elif delta <= -2:
+            moves.append(f"{name} fell {abs(delta)} spots")
+
+    out = "\n=== RIVALRIES & MOVES ==="
+    if gaps:
+        out += "\n" + " | ".join(gaps[:4])
+    if moves:
+        out += "\nThis GW: " + " | ".join(moves[:5])
+    return out if (gaps or moves) else ""
+
+
+def build_bench_season_leaderboard(mini_league_data: Dict, gameweek: int) -> str:
+    """Season cumulative bench points — the unlucky leaderboard."""
+    managers = mini_league_data['standings']['results']
+    totals = []
+    for m in managers:
+        total = sum(h.get('points_on_bench', 0) for h in m.get('history', {}).get('current', []))
+        this_gw = (m.get('gameweek_data', {}).get(str(gameweek), {})
+                    .get('entry_history', {}).get('points_on_bench', 0))
+        totals.append((m['entry_name'], total, this_gw))
+    totals.sort(key=lambda x: x[1], reverse=True)
+    if not totals:
+        return ""
+    lines = [f"{n}: {t}pts benched all season (+{g} this GW)" for n, t, g in totals[:5]]
+    return "\n=== BENCH PAIN LEADERBOARD (season total) ===\n" + "\n".join(lines)
+
+
+def build_power_rankings(mini_league_data: Dict, gameweek: int,
+                          current_scores: List) -> str:
+    """Form-weighted power ranking: 60% last-3 avg + 40% season avg."""
+    managers = mini_league_data['standings']['results']
+    overall = sorted(managers, key=lambda x: x.get('total', 0), reverse=True)
+    overall_rank_map = {m['entry_name']: i + 1 for i, m in enumerate(overall)}
+
+    power = []
+    for m in managers:
+        history = m.get('history', {}).get('current', [])
+        if not history:
+            continue
+        name = m['entry_name']
+        net_pts = [h['points'] - h.get('event_transfers_cost', 0) for h in history]
+        season_avg = sum(net_pts) / len(net_pts)
+        recent = net_pts[-3:] if len(net_pts) >= 3 else net_pts
+        recent_avg = sum(recent) / len(recent)
+        score = round(0.6 * recent_avg + 0.4 * season_avg, 1)
+        power.append((name, score, overall_rank_map.get(name, 99)))
+
+    power.sort(key=lambda x: x[1], reverse=True)
+    if not power:
+        return ""
+    lines = []
+    for pr, (name, score, overall_r) in enumerate(power[:8], 1):
+        diff = overall_r - pr
+        tag = f" ▲{diff}" if diff >= 2 else (f" ▼{abs(diff)}" if diff <= -2 else "")
+        lines.append(f"#{pr} {name} ({score}pts avg){tag}")
+    return "\n=== POWER RANKINGS (form-weighted) ===\n" + "\n".join(lines)
+
+
+def fetch_player_gw_history(player_id: int) -> Dict[int, int]:
+    """Returns {round: total_points} for a player's GW history."""
+    url = BASE_URL + f"element-summary/{player_id}/"
+    data = fetch_data(url)
+    if not data:
+        return {}
+    return {h['round']: h.get('total_points', 0) for h in data.get('history', [])}
+
+
+def compute_captaincy_regret(mini_league_data: Dict, gameweek: int,
+                              player_id_to_points: Dict, player_id_to_name: Dict,
+                              play_status: Dict = None) -> List[Dict]:
+    """Best possible captain from own squad vs actual captain (finished players only)."""
+    results = []
+    for m in mini_league_data['standings']['results']:
+        picks = m.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])
+        if not picks:
+            continue
+        cap_pick = next((p for p in picks if p.get('is_captain')), None)
+        if not cap_pick:
+            continue
+
+        actual_id = cap_pick['element']
+        multiplier = cap_pick.get('multiplier', 2)
+        actual_base = player_id_to_points.get(actual_id, 0)
+        actual_pts = actual_base * multiplier
+        actual_name = player_id_to_name.get(actual_id, '?')
+        actual_status = (play_status or {}).get(actual_id, 'upcoming')
+
+        finished_picks = [p for p in picks
+                          if (play_status or {}).get(p['element'], 'upcoming') == 'finished']
+
+        if not finished_picks:
+            results.append({'manager': m['entry_name'], 'actual_captain': actual_name,
+                            'actual_pts': actual_pts, 'best_captain': 'TBD',
+                            'best_pts': 0, 'regret': 0, 'is_same': False, 'pending': True})
+            continue
+
+        best_pick = max(finished_picks, key=lambda p: player_id_to_points.get(p['element'], 0))
+        best_id = best_pick['element']
+        best_pts = player_id_to_points.get(best_id, 0) * 2
+        best_name = player_id_to_name.get(best_id, '?')
+        regret = best_pts - actual_pts if actual_status == 'finished' else 0
+
+        results.append({'manager': m['entry_name'], 'actual_captain': actual_name,
+                        'actual_pts': actual_pts, 'actual_status': actual_status,
+                        'best_captain': best_name, 'best_pts': best_pts,
+                        'regret': regret, 'is_same': actual_id == best_id, 'pending': False})
+
+    return sorted(results, key=lambda x: x['regret'], reverse=True)
+
+
+def compute_luck_score(mini_league_data: Dict, gameweek: int,
+                       players_data: List, player_id_to_points: Dict) -> List[Dict]:
+    """Actual GW pts vs FPL expected pts (ep_this) for each manager's starting XI."""
+    ep_map = {p['id']: float(p.get('ep_this') or 0) for p in players_data}
+    results = []
+    for m in mini_league_data['standings']['results']:
+        picks = m.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])
+        starters = [p for p in picks if p['position'] <= 11]
+        if not starters:
+            continue
+        expected = sum(ep_map.get(p['element'], 0) * p.get('multiplier', 1) for p in starters)
+        actual = sum(player_id_to_points.get(p['element'], 0) * p.get('multiplier', 1) for p in starters)
+        results.append({'manager': m['entry_name'], 'expected': round(expected, 1),
+                        'actual': actual, 'luck': round(actual - expected, 1)})
+    return sorted(results, key=lambda x: x['luck'], reverse=True)
+
+
+def compute_transfer_regret(mini_league_data: Dict, gameweek: int,
+                             player_id_to_name: Dict) -> List[Dict]:
+    """For each past transfer, compare player OUT vs IN over 3 GWs after transfer."""
+    managers = mini_league_data['standings']['results']
+    all_past_transfers = [t for m in managers for t in m.get('transfers', [])
+                          if t['event'] < gameweek]
+    if not all_past_transfers:
+        return [{'manager': m['entry_name'], 'total_regret': 0, 'worst': None, 'details': []} for m in managers]
+
+    unique_pids = {t['element_out'] for t in all_past_transfers} | {t['element_in'] for t in all_past_transfers}
+    player_history: Dict[int, Dict[int, int]] = {}
+    for pid in unique_pids:
+        player_history[pid] = fetch_player_gw_history(pid)
+
+    results = []
+    for m in managers:
+        name = m['entry_name']
+        past_transfers = [t for t in m.get('transfers', []) if t['event'] < gameweek]
+        if not past_transfers:
+            results.append({'manager': name, 'total_regret': 0, 'worst': None, 'details': []})
+            continue
+
+        details = []
+        for t in past_transfers:
+            gw_out = t['event']
+            window = list(range(gw_out + 1, min(gw_out + 4, gameweek + 1)))
+            out_pts = sum(player_history.get(t['element_out'], {}).get(g, 0) for g in window)
+            in_pts = sum(player_history.get(t['element_in'], {}).get(g, 0) for g in window)
+            regret = out_pts - in_pts
+            details.append({'gw': gw_out,
+                            'out': player_id_to_name.get(t['element_out'], '?'),
+                            'in': player_id_to_name.get(t['element_in'], '?'),
+                            'out_pts': out_pts, 'in_pts': in_pts, 'regret': regret,
+                            'window_gws': len(window)})
+
+        details.sort(key=lambda x: x['regret'], reverse=True)
+        total_regret = sum(d['regret'] for d in details)
+        results.append({'manager': name, 'total_regret': total_regret,
+                        'worst': details[0] if details else None, 'details': details})
+
+    return sorted(results, key=lambda x: x['total_regret'], reverse=True)
+
+
+def compute_manager_archetypes(mini_league_data: Dict, gameweek: int) -> Dict[str, Dict]:
+    """Assign each manager their most extreme archetype label based on season stats."""
+    import statistics
+    managers = mini_league_data['standings']['results']
+    total = len(managers)
+
+    raw: Dict[str, Dict] = {}
+    for m in managers:
+        name = m['entry_name']
+        history = m.get('history', {}).get('current', [])
+        chips = m.get('history', {}).get('chips', [])
+        picks = m.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])
+        transfers = m.get('transfers', [])
+        my_pids = {p['element'] for p in picks}
+
+        total_hits = sum(h.get('event_transfers_cost', 0) for h in history)
+        total_bench = sum(h.get('points_on_bench', 0) for h in history)
+
+        overlaps = []
+        for other in managers:
+            if other['entry_name'] == name:
+                continue
+            other_pids = {p['element'] for p in other.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])}
+            overlaps.append(len(my_pids & other_pids))
+        avg_overlap = sum(overlaps) / len(overlaps) if overlaps else 0
+
+        cap_pick = next((p for p in picks if p.get('is_captain')), None)
+        cap_uniqueness = 0
+        if cap_pick:
+            cap_pid = cap_pick['element']
+            cap_count = sum(
+                1 for other in managers
+                if any(p.get('is_captain') and p['element'] == cap_pid
+                       for p in other.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', []))
+            )
+            cap_uniqueness = total - cap_count
+
+        wc_chip = next((c for c in chips if c['name'] in ('wildcard', 'freehit')), None)
+        wc_regret = 0
+        if wc_chip:
+            wc_gw = wc_chip['event']
+            all_gw_scores = [h['points'] - h.get('event_transfers_cost', 0)
+                             for other in managers
+                             for h in other.get('history', {}).get('current', [])
+                             if h['event'] == wc_gw]
+            league_avg_wc = sum(all_gw_scores) / len(all_gw_scores) if all_gw_scores else 50
+            my_wc_score = next((h['points'] - h.get('event_transfers_cost', 0)
+                                for h in history if h['event'] == wc_gw), league_avg_wc)
+            wc_regret = max(0, league_avg_wc - my_wc_score)
+
+        net_pts_list = [h['points'] - h.get('event_transfers_cost', 0) for h in history]
+        volatility = statistics.stdev(net_pts_list) if len(net_pts_list) >= 2 else 0
+
+        num_transfers = len(transfers)
+        ironman_score = -num_transfers
+
+        first_rank = history[0].get('overall_rank', 0) if history else 0
+        latest_rank = history[-1].get('overall_rank', 0) if history else 0
+        rank_improvement = first_rank - latest_rank
+
+        raw[name] = {
+            'The Hit Addict': total_hits,
+            'The Bench Hoarder': total_bench,
+            'The Template Merchant': avg_overlap,
+            'The Captain Contrarian': cap_uniqueness,
+            'The Wildcard Waster': wc_regret,
+            'The Streaky Scorer': volatility,
+            'The Ironman': ironman_score,
+            'The Comeback Kid': rank_improvement,
+        }
+
+    archetypes_list = list(raw[managers[0]['entry_name']].keys())
+    norm: Dict[str, Dict] = {m['entry_name']: {} for m in managers}
+    for archetype in archetypes_list:
+        vals = [raw[m['entry_name']][archetype] for m in managers]
+        mn, mx = min(vals), max(vals)
+        rng = mx - mn if mx != mn else 1
+        for m in managers:
+            name = m['entry_name']
+            norm[name][archetype] = (raw[name][archetype] - mn) / rng
+
+    result = {}
+    reasons = {
+        'The Hit Addict': lambda m, r: f"{r['The Hit Addict']:.0f}pts in transfer hits",
+        'The Bench Hoarder': lambda m, r: f"{r['The Bench Hoarder']:.0f}pts left on bench this season",
+        'The Template Merchant': lambda m, r: f"avg {r['The Template Merchant']:.1f} squad overlaps with the league",
+        'The Captain Contrarian': lambda m, r: f"captained a player owned by {max(1, total - int(r['The Captain Contrarian']))} others",
+        'The Wildcard Waster': lambda m, r: f"used chip in a below-avg GW",
+        'The Streaky Scorer': lambda m, r: f"highest score variance in the league",
+        'The Ironman': lambda m, r: f"barely touches the squad",
+        'The Comeback Kid': lambda m, r: f"biggest rank improvement this season",
+    }
+    for m in managers:
+        name = m['entry_name']
+        best_archetype = max(norm[name].items(), key=lambda x: x[1])[0]
+        raw_val = raw[name]
+        try:
+            reason = reasons[best_archetype](name, raw_val)
+        except Exception:
+            reason = best_archetype
+        result[name] = {'label': best_archetype, 'reason': reason}
+
+    return result
+
+
+def build_captaincy_regret_context(regret_data: List[Dict]) -> str:
+    if not regret_data:
+        return ""
+    lines = []
+    for r in regret_data:
+        if r.get('pending'):
+            lines.append(f"- {r['manager']}: captain {r['actual_captain']} yet to play — regret TBD")
+        elif r['is_same']:
+            lines.append(f"- {r['manager']}: nailed it — {r['actual_captain']} was the right call ({r['actual_pts']}pts)")
+        else:
+            lines.append(f"- {r['manager']}: captained {r['actual_captain']} ({r['actual_pts']}pts) | "
+                         f"best pick was {r['best_captain']} ({r['best_pts']}pts) | "
+                         f"regret: {r['regret']:+d}pts")
+    return "\n=== CAPTAINCY REGRET ===\n" + "\n".join(lines)
+
+
+def build_luck_score_context(luck_data: List[Dict]) -> str:
+    if not luck_data:
+        return ""
+    lines = []
+    for ld in luck_data:
+        sign = "+" if ld['luck'] >= 0 else ""
+        label = "LUCKY" if ld['luck'] > 5 else ("UNLUCKY" if ld['luck'] < -5 else "on track")
+        lines.append(f"- {ld['manager']}: expected {ld['expected']}pts, got {ld['actual']}pts "
+                     f"({sign}{ld['luck']} luck) [{label}]")
+    return "\n=== LUCK SCORES (xPts vs actual) ===\n" + "\n".join(lines)
+
+
+def build_transfer_regret_context(regret_data: List[Dict]) -> str:
+    if not regret_data:
+        return ""
+    lines = []
+    for r in regret_data:
+        if r['total_regret'] == 0 and r['worst'] is None:
+            lines.append(f"- {r['manager']}: no past transfers yet")
+            continue
+        worst = r['worst']
+        if worst and worst['regret'] > 0:
+            lines.append(f"- {r['manager']}: season transfer regret {r['total_regret']:+d}pts | "
+                         f"worst: sold {worst['out']} for {worst['in']} in GW{worst['gw']} "
+                         f"({worst['out']} got {worst['out_pts']}pts vs {worst['in']} {worst['in_pts']}pts "
+                         f"over next {worst['window_gws']} GWs = {worst['regret']:+d}pts regret)")
+        else:
+            lines.append(f"- {r['manager']}: transfer regret {r['total_regret']:+d}pts (net positive)")
+    return "\n=== TRANSFER REGRET (3-GW window) ===\n" + "\n".join(lines[:8])
+
+
+def build_archetypes_context(archetypes: Dict[str, Dict]) -> str:
+    if not archetypes:
+        return ""
+    lines = [f"- {name}: {data['label']} ({data['reason']})"
+             for name, data in archetypes.items()]
+    return "\n=== MANAGER ARCHETYPES ===\n" + "\n".join(lines)
+
+
+def build_points_left_on_table(mini_league_data: Dict, gameweek: int,
+                                regret_data: List[Dict], luck_data: List[Dict]) -> str:
+    """Per-manager GW self-destruction: bench waste + captain miss + transfer cost."""
+    managers = mini_league_data['standings']['results']
+    regret_map = {r['manager']: r.get('regret', 0) for r in regret_data}
+    rows = []
+    for m in managers:
+        name = m['entry_name']
+        gw_data = m.get('gameweek_data', {}).get(str(gameweek), {})
+        entry_history = gw_data.get('entry_history', {})
+        bench_pts = entry_history.get('points_on_bench', 0)
+        transfer_cost = entry_history.get('event_transfers_cost', 0)
+        cap_miss = max(0, regret_map.get(name, 0))
+        total_lost = bench_pts + cap_miss + transfer_cost
+        rows.append({'manager': name, 'bench': bench_pts, 'cap_miss': cap_miss,
+                     'hit': transfer_cost, 'total': total_lost})
+
+    rows.sort(key=lambda x: x['total'], reverse=True)
+    if not rows:
+        return ""
+    lines = []
+    for r in rows:
+        parts = []
+        if r['bench']:
+            parts.append(f"{r['bench']}pts benched")
+        if r['cap_miss']:
+            parts.append(f"{r['cap_miss']}pts captain miss")
+        if r['hit']:
+            parts.append(f"{r['hit']}pts hit")
+        detail = " + ".join(parts) if parts else "clean week"
+        lines.append(f"- {r['manager']}: {r['total']}pts left on table ({detail})")
+    return "\n=== POINTS LEFT ON TABLE (this GW) ===\n" + "\n".join(lines)
+
+
 def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: List,
                          player_id_to_name: Dict = None, player_id_to_points: Dict = None,
-                         is_final: bool = False, gw_status: Dict = None) -> str:
+                         is_final: bool = False, gw_status: Dict = None,
+                         play_status: Dict = None, players_data: List = None,
+                         extra_context: str = "") -> str:
     """Generate AI-powered insights using OpenAI API with rich historical and player context."""
     if not OPENAI_AVAILABLE:
         return None
@@ -2442,200 +3092,179 @@ def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: 
         
         client = OpenAI(api_key=api_key)
         
-        # Gather rich insights data
-        data = gather_rich_insights_data(mini_league_data, gameweek, current_scores, 
-                                         player_id_to_name, player_id_to_points)
-        
-        # Add gameweek status context
+        # Gather rich insights data (now play_status-aware)
+        data = gather_rich_insights_data(mini_league_data, gameweek, current_scores,
+                                         player_id_to_name, player_id_to_points,
+                                         play_status=play_status)
+
         if gw_status is None:
             gw_status = get_gameweek_status(gameweek)
-        
+
         data['is_final'] = is_final or gw_status.get('is_finished', False)
         data['gw_status'] = gw_status
-        
-        # Build comprehensive but token-optimized prompt
-        # Check if winner/loser took a hit
-        winner = data.get('gw_winner', {})
-        loser = data.get('gw_loser', {})
-        winner_hit = f" (took -{winner.get('transfer_cost', 0)}pt hit)" if winner.get('transfer_cost', 0) > 0 else ""
-        loser_hit = f" (took -{loser.get('transfer_cost', 0)}pt hit)" if loser.get('transfer_cost', 0) > 0 else ""
-        
-        # Get gameweek status context
-        gw_status = data.get('gw_status', {})
-        is_final = data.get('is_final', False)
+        is_final = data['is_final']
         fixtures_finished = gw_status.get('fixtures_finished', 0)
         fixtures_remaining = gw_status.get('fixtures_remaining', 0)
         total_fixtures = gw_status.get('total_fixtures', 10)
-        
-        # Build status context
-        if is_final:
-            status_context = "=== FINAL RESULTS ==="
-            status_note = "All fixtures completed - these are the FINAL standings for this gameweek."
-        elif fixtures_remaining > 0:
-            status_context = f"=== LIVE UPDATE ({fixtures_finished}/{total_fixtures} games played) ==="
-            status_note = f"IMPORTANT: {fixtures_remaining} game(s) still to play! Standings will likely change. Points are provisional."
-        else:
-            status_context = "=== GAMEWEEK RESULTS ==="
-            status_note = "All fixtures completed."
-        
-        prompt = f"""You're a witty FPL pundit creating a PERSONALIZED gameweek {gameweek} report for a mini-league. 
-Make it entertaining with banter, call out specific managers, and create narratives everyone will enjoy.
-NOTE: All points shown are NET (after any transfer hit deductions).
+        fixtures_in_progress = gw_status.get('fixtures_in_progress', 0)
+        fixtures_not_started = gw_status.get('fixtures_not_started',
+                                              total_fixtures - fixtures_finished - fixtures_in_progress)
 
-{status_context}
-{status_note}
+        # ------------------------------------------------------------------ #
+        # Build the data grounding block — the AI MUST only use names/numbers
+        # from here. Full table prevents hallucination of scores and names.
+        # ------------------------------------------------------------------ #
+        gw_sorted = sorted(current_scores,
+                           key=lambda x: x.get('points', x.get('net_points', 0)),
+                           reverse=True)
 
-- Current Leader: {winner.get('manager', 'N/A')} ({winner.get('points', 0)}pts NET){winner_hit}
-- Current Last: {loser.get('manager', 'N/A')} ({loser.get('points', 0)}pts NET){loser_hit}
-- League Average: {data.get('gw_avg', 0):.0f}pts
+        # Convert current_scores structure to match what build_full_standings_for_ai expects
+        gw_standings_for_ai = [
+            {'manager': s['manager'], 'GW Points': s.get('points', 0),
+             'Team Name': s['manager']}
+            for s in gw_sorted
+        ]
 
-=== OVERALL STANDINGS ===
-- Leader: {data.get('leader', 'N/A')} ({data.get('leader_total', 0)}pts)
-- Chasing: {', '.join([f"{g['manager']} (-{g['gap']}pts)" for g in data.get('gaps_to_leader', [])[:3]])}
-"""
-        
-        # Add hit summary at the top if any
+        full_table = build_full_standings_for_ai(
+            gw_standings_for_ai, mini_league_data,
+            play_status or {}, player_id_to_name or {},
+            player_id_to_points or {}, gameweek
+        )
+        captain_ctx = build_captain_context(
+            mini_league_data, gameweek, players_data or [],
+            player_id_to_name or {}, player_id_to_points or {},
+            play_status=play_status
+        )
+        captaincy_trends = build_league_captaincy_trends(
+            mini_league_data, gameweek,
+            player_id_to_name or {}, player_id_to_points or {},
+            play_status=play_status
+        )
+        rivalry_ctx = build_rivalry_context(mini_league_data, gameweek, current_scores)
+        bench_ctx = build_bench_season_leaderboard(mini_league_data, gameweek)
+        power_ctx = build_power_rankings(mini_league_data, gameweek, current_scores)
+        ytp_ctx = build_yet_to_play_context(
+            mini_league_data, gameweek, play_status,
+            player_id_to_name or {}, player_id_to_points or {}
+        )
+        squad_status_ctx = build_squad_play_status_context(
+            mini_league_data, gameweek, play_status or {},
+            player_id_to_name or {}, player_id_to_points or {}
+        )
+
+        # Extra spicy facts if available
+        extra_facts = []
         if data.get('hit_takers'):
-            hit_summary = ", ".join([f"{h['manager']} (-{h['hit_cost']})" for h in data['hit_takers'][:3]])
-            prompt += f"\n[!] HIT TAKERS THIS GW: {hit_summary}"
-
-        # Add form/streaks if notable
-        if data.get('hottest_form') and data['hottest_form']['form_diff'] > 2:
-            hf = data['hottest_form']
-            prompt += f"\n[HOT FORM] {hf['manager']} (Last 5 avg: {hf['last_5_avg']}pts vs season {hf['season_avg']}pts)"
-        
-        if data.get('coldest_form') and data['coldest_form']['form_diff'] < -2:
-            cf = data['coldest_form']
-            prompt += f"\n[COLD FORM] {cf['manager']} (Last 5 avg: {cf['last_5_avg']}pts vs season {cf['season_avg']}pts)"
-        
-        # Add streaks
-        for streak in data.get('streaks', [])[:2]:
-            streak_label = "HOT STREAK" if streak['type'] == 'hot' else "COLD STREAK"
-            prompt += f"\n[{streak_label}] {streak['manager']} - {streak['streak']} GWs {'above' if streak['type'] == 'hot' else 'below'} average"
-
-        # Add rank movements
-        if data.get('biggest_climber') and data['biggest_climber']['change'] >= 2:
-            bc = data['biggest_climber']
-            prompt += f"\n[CLIMBER] {bc['manager']} jumped {bc['change']} places (#{bc['prev_rank']}->{bc['current_rank']}) with {bc['gw_points']}pts"
-        
-        if data.get('biggest_faller') and data['biggest_faller']['change'] <= -2:
-            bf = data['biggest_faller']
-            prompt += f"\n[FALLER] {bf['manager']} dropped {abs(bf['change'])} places (#{bf['prev_rank']}->{bf['current_rank']})"
-
-        # Add week-over-week improvement/decline
-        if data.get('biggest_improvement') and data['biggest_improvement']['change'] > 15:
-            bi = data['biggest_improvement']
-            prompt += f"\n[BOUNCE BACK] {bi['manager']} scored {bi['current']}pts (up {bi['change']} from last week's {bi['previous']})"
-        
-        if data.get('biggest_decline') and data['biggest_decline']['change'] < -15:
-            bd = data['biggest_decline']
-            prompt += f"\n[CRASH] {bd['manager']} dropped from {bd['previous']}pts to {bd['current']}pts"
-
-        # Add captain analysis
-        if data.get('best_captain'):
-            bc = data['best_captain']
-            prompt += f"\n[CAPTAIN WIN] {bc['manager']} with {bc['captain']} ({bc['points']}pts)"
-        
-        if data.get('captain_fails'):
-            fails = data['captain_fails'][:2]
-            for cf in fails:
-                prompt += f"\n[CAPTAIN FAIL] {cf['manager']} captained {cf['captain']} ({cf['points']}pts)"
-
-        # Add transfer analysis
+            for h in data['hit_takers'][:3]:
+                extra_facts.append(f"{h['manager']} took a -{h['hit_cost']}pt hit "
+                                   f"(gross: {h['gross_points']}pts, net: {h['net_points']}pts)")
+        if data.get('most_bench_points') and data['most_bench_points']['bench_points'] >= 8:
+            mb = data['most_bench_points']
+            extra_facts.append(f"{mb['manager']} left {mb['bench_points']}pts rotting on the bench")
         if data.get('transfer_heroes'):
             th = data['transfer_heroes'][0]
-            prompt += f"\n[TRANSFER GENIUS] {th['manager']} ({th['transfers'][0] if th['transfers'] else 'transfers'}) +{th['net_effect']}pts net"
-        
+            xf = th['transfers'][0] if th.get('transfers') else 'a transfer'
+            extra_facts.append(f"{th['manager']} nailed {xf} for +{th['net_effect']}pts net gain")
         if data.get('transfer_villains'):
             tv = data['transfer_villains'][0]
-            prompt += f"\n[TRANSFER DISASTER] {tv['manager']} ({tv['transfers'][0] if tv['transfers'] else 'transfers'}) {tv['net_effect']}pts net"
+            xf = tv['transfers'][0] if tv.get('transfers') else 'a transfer'
+            extra_facts.append(f"{tv['manager']} regrets {xf} ({tv['net_effect']}pts swing)")
+        for rec in data.get('records', [])[:2]:
+            if rec['type'] == 'season_high':
+                extra_facts.append(f"{rec['manager']} just set a new personal season best: {rec['points']}pts")
+            elif rec['type'] == 'season_low' and gameweek > 1:
+                extra_facts.append(f"{rec['manager']} hit their season low this week: {rec['points']}pts")
+        if data.get('hottest_form') and data['hottest_form']['form_diff'] > 3:
+            hf = data['hottest_form']
+            extra_facts.append(f"{hf['manager']} is on fire — last 5 avg {hf['last_5_avg']}pts vs "
+                               f"season avg {hf['season_avg']}pts")
+        if data.get('biggest_climber') and data['biggest_climber']['change'] >= 2:
+            bc = data['biggest_climber']
+            extra_facts.append(f"{bc['manager']} jumped {bc['change']} league spots this GW")
+        if data.get('biggest_faller') and data['biggest_faller']['change'] <= -2:
+            bf = data['biggest_faller']
+            extra_facts.append(f"{bf['manager']} crashed {abs(bf['change'])} league spots this GW")
 
-        # Add hit analysis (transfer point deductions)
-        if data.get('painful_hits'):
-            for ph in data['painful_hits'][:2]:
-                prompt += f"\n[PAINFUL HIT] {ph['manager']} took -{ph['hit_cost']}pt hit, scored only {ph['net_points']}pts NET ({ph['gross_points']}pts gross)"
-        
-        if data.get('smart_hits'):
-            sh = data['smart_hits'][0]
-            prompt += f"\n[HIT PAID OFF] {sh['manager']} took -{sh['hit_cost']}pt hit but still got {sh['net_points']}pts NET"
-
-        # Add bench points shame
-        if data.get('most_bench_points') and data['most_bench_points']['bench_points'] >= 10:
-            mb = data['most_bench_points']
-            prompt += f"\n[BENCH REGRET] {mb['manager']} left {mb['bench_points']}pts on the bench!"
-
-        # Add records
-        for record in data.get('records', [])[:2]:
-            if record['type'] == 'season_high':
-                prompt += f"\n[SEASON HIGH] {record['manager']} set a new PB with {record['points']}pts!"
-            else:
-                prompt += f"\n[SEASON LOW] {record['manager']} hit rock bottom with {record['points']}pts"
-
-        # Add title race context
-        if data.get('title_race_tight'):
-            prompt += "\n[TITLE RACE] Top 3 separated by less than 20 points - it's heating up!"
-        
-        if data.get('relegation_battle_tight'):
-            prompt += "\n[BOTTOM BATTLE] The wooden spoon race is tighter than ever!"
-
-        # Add context-specific instructions based on live vs final
+        # Status framing
         if is_final:
-            task_context = """
-=== YOUR TASK (FINAL RESULTS) ===
-Write a 150-200 word FINAL analysis that:
-1. Opens with a punchy headline celebrating/roasting the GW winner
-2. Creates narratives around form, rivalries, or momentum shifts  
-3. Calls out specific managers with witty banter (roasts are welcome!)
-4. Mentions at least 3-4 different managers by name
-5. Ends with a teaser about what to watch next week
-
-This is the FINAL result - crown the winner, roast the loser!"""
+            status_line = f"GW{gameweek} FINAL — all {total_fixtures} fixtures done."
+            task = (
+                f"Write a punchy 200-250 word FINAL match report for GW{gameweek}. "
+                "Crown the winner, roast the bottom, highlight the biggest stories. "
+                "FINAL results — you can be definitive. Make it feel like a WhatsApp message everyone screenshots."
+            )
         else:
-            task_context = f"""
-=== YOUR TASK (LIVE UPDATE - {fixtures_remaining} games remaining) ===
-Write a 150-200 word LIVE update that:
-1. Opens with a punchy headline about current standings - but note things CAN CHANGE
-2. Highlight who's in the lead but remind everyone there are still games to go
-3. Call out managers with players yet to play who could climb/fall
-4. Mention at least 3-4 different managers by name
-5. Build suspense - who could overtake whom? What needs to happen?
+            # Spell out the fixture state in plain English so the AI can't misread it
+            if fixtures_finished == 0 and fixtures_in_progress == 0:
+                fixture_state = (f"NO fixtures have finished yet — GW{gameweek} has not really started. "
+                                 f"All {total_fixtures} games are still to come.")
+            elif fixtures_finished == 0 and fixtures_in_progress > 0:
+                fixture_state = (f"{fixtures_in_progress} fixture(s) are CURRENTLY IN PROGRESS "
+                                 f"but ZERO have finished. {fixtures_not_started} more yet to kick off. "
+                                 f"Scores are completely provisional — nothing is settled.")
+            else:
+                fixture_state = (f"{fixtures_finished} of {total_fixtures} fixtures have FINISHED. "
+                                 f"{fixtures_in_progress} currently in progress. "
+                                 f"{fixtures_not_started} still to kick off (not started yet).")
+            status_line = (
+                f"GW{gameweek} IN PROGRESS — {fixture_state} "
+                f"STANDINGS ARE PROVISIONAL AND WILL CHANGE."
+            )
+            task = (
+                f"Write a punchy 200-250 word LIVE match-day update for GW{gameweek}. "
+                f"Be honest about how early/late in the gameweek we are ({fixture_state}). "
+                f"Hype up the current leaders but remind everyone {fixtures_not_started} game(s) are still to kick off. "
+                "Flag managers whose captain/key players are yet to play — they could rocket or crater. "
+                "IMPORTANT: a player showing 0pts may have ALREADY PLAYED and just blanked — check squad play status. "
+                "Build suspense. Do NOT declare winners yet — this is mid-gameweek drama."
+            )
 
-CRITICAL: Do NOT declare final winners/losers! Say "currently leading" not "won". 
-Acknowledge that with {fixtures_remaining} game(s) left, ANYTHING can happen!
-First-day scores are usually lower - keep expectations in check."""
-        
-        prompt += task_context
-        prompt += """
+        all_ctx = "\n\n".join(filter(None, [
+            full_table, squad_status_ctx, captain_ctx, captaincy_trends, rivalry_ctx,
+            power_ctx, bench_ctx, ytp_ctx, extra_context,
+            ("EXTRA STORY ANGLES:\n" + "\n".join(f"- {f}" for f in extra_facts)) if extra_facts else ""
+        ]))
 
-IMPORTANT: Do NOT use emojis or markdown formatting. Plain text only. Use CAPS for emphasis.
-Be conversational, use humor, create drama - make everyone in the league excited to read this!"""
+        # All valid manager first names (so AI knows who exists in this league)
+        valid_names = ", ".join(
+            m['entry_name'].split()[0]
+            for m in mini_league_data['standings']['results']
+        )
 
-        logger.info(f"Calling OpenAI API with enhanced prompt length: {len(prompt)}")
-        
+        prompt = f"""{status_line}
+
+{all_ctx}
+
+VALID FIRST NAMES IN THIS LEAGUE: {valid_names}
+
+YOUR TASK: {task}
+
+ABSOLUTE RULES — breaking any of these makes the output worthless:
+1. ONLY use manager names and football player names that appear in the data above. Zero invention.
+2. Every point figure you state must match the table exactly.
+3. Captains with [HAS NOT PLAYED YET] or [CURRENTLY PLAYING] must NOT be called flops or failures — their story isn't written yet. You may tease "watch this space".
+4. NET points (after hit deductions) are the official score. If someone took a hit, note it.
+5. No emojis, no markdown (**bold** etc), plain text only, CAPS for emphasis.
+
+TONE: You are the funniest person in a WhatsApp group of football obsessives. Warm roasting, genuine banter, first-name basis. Reference ACTUAL captain picks and real player names. Make every manager feel seen — mention as many as you can. One punchy headline, then the story, then a one-liner teaser for next week."""
+
+        logger.info(f"Calling OpenAI API with prompt length: {len(prompt)}")
+
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Better model for nuanced, entertaining content
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"""You are a legendary FPL pundit known for witty, entertaining match reports. 
-You write like a mix of Gary Neville's analysis and Twitter banter. You're not afraid to roast poor performers 
-while celebrating winners. Make every manager feel mentioned and part of the story.
-
-CONTEXT AWARENESS:
-- If this is a LIVE update (games remaining), use phrases like "currently leading", "so far", "as it stands"
-- If this is FINAL results, you can declare winners and losers definitively
-- On first matchday, scores are typically lower - don't overreact to low scores
-- {'This is a FINAL report - results are locked in!' if is_final else f'This is a LIVE update - {fixtures_remaining} games still to play!'}
-
-IMPORTANT FORMAT RULES:
-- DO NOT use any emojis - the message will be sent via a system that doesn't support them
-- DO NOT use markdown formatting like **bold** or *italic* - use CAPS for emphasis instead
-- Keep it plain text only
-- Use simple ASCII punctuation only
-
-Create drama and narratives that make people want to respond."""},
+                {"role": "system", "content": (
+                    "You are the voice of 'Pullman Football Samaj' — a 15-man FPL mini-league group chat. "
+                    "You write like the funniest analyst in the group: sharp, data-driven, genuinely funny, "
+                    "never cruel, always relatable. You know these managers personally. You remember their "
+                    "previous GW disasters and lucky streaks. You celebrate and roast in equal measure. "
+                    f"{'This is the FINAL result — be definitive.' if is_final else f'This is LIVE with {fixtures_remaining} games left — be dramatic and provisional.'} "
+                    "Plain text only. CAPS for emphasis. No emojis. No markdown."
+                )},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=350,  # More tokens for richer content
-            temperature=0.8  # Slightly higher for more creative output
+            max_tokens=600,
+            temperature=0.85
         )
         
         logger.info(f"OpenAI API response received. Choices count: {len(response.choices)}")
@@ -2943,7 +3572,12 @@ def get_detailed_gw_data(manager_data, desired_gw, player_id_to_name, player_id_
     return gw_data_list
 
 def main(args):
-    league_id = 469324
+    # FPL mini-league id. Priority: --lid arg > FANTASY_GROUP_ID env > default.
+    # NOTE: FANTASY_GROUP_ID currently holds the FPL league id (348645,
+    # "Pullman Football Samaj"). The Facebook Messenger thread should get its
+    # own variable before re-enabling the FB sender.
+    league_id = args.lid or int(os.getenv('FANTASY_GROUP_ID') or 348645)
+    logger.info(f"Using FPL league id: {league_id}")
     is_final = args.final
     gameweek = int(args.gw)
 
@@ -2978,6 +3612,14 @@ def main(args):
     with open(player_data_file, 'r') as file:
         players_data = json.load(file)['elements']
 
+    # Use REAL manager names everywhere instead of FPL team names. We keep the
+    # original team name under 'team_name' and overwrite 'entry_name' so every
+    # downstream function (fun facts, AI narrative, message, report) uses the
+    # real name automatically.
+    for _m in mini_league_data['standings']['results']:
+        _m['team_name'] = _m['entry_name']
+        _m['entry_name'] = _m.get('player_name') or _m['entry_name']
+
     player_id_to_name = {player['id']: player['web_name'] for player in players_data}
     # Update player points to use live data
     if live_data and 'elements' in live_data:
@@ -2991,9 +3633,13 @@ def main(args):
     output = f"Analysis generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
     # Extract detailed gameweek data for all managers in the mini-league
+    detail_by_entry = {}  # entry_id -> per-manager GW detail dict (for the infographic)
     for manager_data in mini_league_data['standings']['results']:
-        manager_name = manager_data['entry_name']
+        # Use the real manager name, not the FPL team name.
+        manager_name = manager_data.get('player_name') or manager_data['entry_name']
         gw_data = get_detailed_gw_data(manager_data, int(gameweek), player_id_to_name, player_id_to_points, player_id_to_position, mini_league_data)
+        if gw_data:
+            detail_by_entry[manager_data['entry']] = gw_data[0]
 
         output += f"\nManager: {manager_name}\n"
         output += "-" * 80 + "\n"
@@ -3029,8 +3675,8 @@ def main(args):
         transfer_cost = entry_history.get('event_transfers_cost', 0)
         net_points = gross_points - transfer_cost  # Calculate NET after hits
         team_data.append({
-            'Team Name': team['entry_name'], 
-            'Points': team['total'], 
+            'Team Name': team.get('player_name') or team['entry_name'],
+            'Points': team['total'],
             'GW Points': net_points  # Use NET points
         })
     
@@ -3054,131 +3700,297 @@ def main(args):
             'took_hit': transfer_cost > 0
         })
 
-    generate_all_plots(
-        mini_league_data, 
-        gameweek,
-        player_id_to_name,
-        player_id_to_points,
-        player_id_to_position
-    )
-
     output += "\nLeague Standings:\n"
     output += "Team Name,Points\n"
     for team in team_data:
         output += f"{team['Team Name']},{team['Points']}\n"
 
+    # Determine which players have finished / are playing / are yet to play so
+    # live analysis is accurate (e.g. don't call a captain fail before kickoff).
+    play_status = build_play_status_map(gameweek, players_data)
+
     # Calculate fun facts for the message
-    fun_facts = calculate_weekly_fun_facts(mini_league_data, gameweek, player_id_to_name, player_id_to_points)
-    
+    fun_facts = calculate_weekly_fun_facts(mini_league_data, gameweek, player_id_to_name, player_id_to_points, play_status=play_status)
+
     # Get gameweek status (fixtures finished/remaining)
     gw_status = get_gameweek_status(gameweek)
     logger.info(f"GW{gameweek} status: {gw_status['fixtures_finished']}/{gw_status['total_fixtures']} fixtures complete, is_final={is_final}")
     print(f"GW{gameweek} status: {gw_status['fixtures_finished']}/{gw_status['total_fixtures']} fixtures, Final={is_final}")
     
+    # Compute new analytics
+    captaincy_regret_data = compute_captaincy_regret(
+        mini_league_data, gameweek, player_id_to_points, player_id_to_name, play_status)
+    luck_data = compute_luck_score(mini_league_data, gameweek, players_data, player_id_to_points)
+    try:
+        transfer_regret_data = compute_transfer_regret(mini_league_data, gameweek, player_id_to_name)
+    except Exception as e:
+        logger.warning(f"Transfer regret computation failed: {e}")
+        transfer_regret_data = []
+    archetypes = compute_manager_archetypes(mini_league_data, gameweek)
+
+    # Build context strings for AI
+    cap_regret_ctx = build_captaincy_regret_context(captaincy_regret_data)
+    luck_ctx = build_luck_score_context(luck_data)
+    transfer_regret_ctx = build_transfer_regret_context(transfer_regret_data)
+    archetypes_ctx = build_archetypes_context(archetypes)
+    points_left_ctx = build_points_left_on_table(mini_league_data, gameweek, captaincy_regret_data, luck_data)
+    extra_context = "\n\n".join(filter(None, [cap_regret_ctx, luck_ctx, transfer_regret_ctx, archetypes_ctx, points_left_ctx]))
+
     # Generate AI insights using overall and historical data with player context
     print(f"Calling generate_ai_insights for GW{gameweek}...")
     print(f"Current scores count: {len(current_scores)}")
-    ai_insights = generate_ai_insights(mini_league_data, gameweek, current_scores, 
+    ai_insights = generate_ai_insights(mini_league_data, gameweek, current_scores,
                                        player_id_to_name, player_id_to_points,
-                                       is_final=is_final, gw_status=gw_status)
+                                       is_final=is_final, gw_status=gw_status,
+                                       play_status=play_status, players_data=players_data,
+                                       extra_context=extra_context)
     logger.info(f"AI insights returned: {ai_insights is not None}, length: {len(ai_insights) if ai_insights else 0}")
     
-    # Create GW vs Overall analysis plot (as plot #1) - without AI insights in the plot
-    plot_gw_vs_overall_analysis(mini_league_data, gameweek, current_scores, fun_facts, None, num=1)
-    
-    # Wait for all plots to be created before generating PDF
-    import time
-    plots_dir = create_plots_directory()
-    expected_plots = [f'{i}_' for i in range(1, 11)]  # Plots 1-10
-    max_wait = 30  # Maximum wait time in seconds
-    wait_time = 0
-    while wait_time < max_wait:
-        all_ready = True
-        for prefix in expected_plots:
-            matching_files = [f for f in os.listdir(plots_dir) if f.startswith(prefix) and f.endswith('.png')]
-            if not matching_files:
-                all_ready = False
-                break
-        if all_ready:
-            break
-        time.sleep(0.5)
-        wait_time += 0.5
-    
-    # Generate PDF after all plots are ready
-    generate_pdf_report(gameweek)
+    # -------------------------------------------------------------------- #
+    # Single-image infographic report (replaces the old multi-PNG + PDF).
+    # Build a rich data payload -> render modern HTML -> one tall high-DPI PNG.
+    # -------------------------------------------------------------------- #
+    import report as report_mod
+    import report_template
+    import importlib
+    importlib.reload(report_mod)
+    importlib.reload(report_template)
+
+    gw_average = calculate_gw_average(mini_league_data, gameweek)
+    league_name = mini_league_data.get('league', {}).get('name', 'Mini League')
+
+    payload = report_mod.build_payload(
+        mini_league_data=mini_league_data,
+        gameweek=gameweek,
+        league_name=league_name,
+        detail_by_entry=detail_by_entry,
+        current_scores=current_scores,
+        fun_facts=fun_facts,
+        ai_insights=ai_insights,
+        gw_average=gw_average,
+        is_final=is_final,
+    )
+
+    payload_file = os.path.join(local_path, f"report_data_gw{gameweek}.json")
+    report_mod.write_payload(payload, payload_file)
+    print(f"Report payload saved to {payload_file}")
+
+    html_str = report_template.render_report_html(payload)
+    html_file = os.path.join(local_path, f"report_gw{gameweek}.html")
+    with open(html_file, 'w', encoding='utf-8') as f:
+        f.write(html_str)
+    print(f"HTML report saved to {html_file}")
+
+    png_file = os.path.join(local_path, f"report_gw{gameweek}.png")
+    try:
+        report_mod.render_html_to_png(html_file, png_file)
+        print(f"Infographic image saved to {png_file}")
+    except Exception as e:
+        logger.error(f"Failed to render infographic PNG: {e}")
+        print(f"WARNING: could not render PNG ({e}); HTML report is still available.")
     
     # Build a Messenger-friendly message with emojis, real line breaks, and
     # dividers between sections. Each block is appended only if it has content,
     # then the blocks are joined with a horizontal divider.
     DIVIDER = "━━━━━━━━━━━━━━━━━━━━"
+    MEDALS = ["🥇", "🥈", "🥉"]
     sections: list[str] = []
 
-    # --- Header: champion / tied / live standings -------------------------
+    # Compute per-GW average for above/below indicator
+    gw_avg_pts = (sum(t['GW Points'] for t in gw_standings) / len(gw_standings)
+                  if gw_standings else 0)
+
+    CHIP_EMOJI = {'3xc': '3️⃣', 'bboost': '🚀', 'freehit': '🆓', 'wildcard': '🃏'}
+
+    # --- Header: full leaderboard (FINAL or LIVE) -------------------------
     if is_final:
         highest_score = gw_standings[0]['GW Points']
-        winners = [team for team in gw_standings if team['GW Points'] == highest_score]
+        winners = [t for t in gw_standings if t['GW Points'] == highest_score]
 
         if len(winners) == 1:
-            w = winners[0]
-            sections.append(
-                f"🏆 GW{gameweek} CHAMPION\n"
-                f"{w['Team Name']} — {w['GW Points']} pts"
-            )
+            header = f"🏆 GW{gameweek} CHAMPION\n{winners[0]['Team Name']} — {highest_score} pts"
         else:
-            winner_lines = "\n".join(team['Team Name'] for team in winners)
-            sections.append(
-                f"🤝 GW{gameweek} TIED AT THE TOP — {highest_score} pts each\n"
-                f"{winner_lines}"
-            )
-    else:
-        standings_lines = "\n".join(
-            f"{team['GW Points']} — {team['Team Name']}" for team in gw_standings
-        )
-        sections.append(f"🏁 GW{gameweek} LIVE STANDINGS\n{standings_lines}")
+            header = (f"🤝 GW{gameweek} TIED — {highest_score} pts each\n"
+                      + "\n".join(t['Team Name'] for t in winners))
 
-    # --- Highlights (fun facts) -------------------------------------------
+        # Full leaderboard for FINAL so everyone sees their exact place
+        rows = []
+        for i, team in enumerate(gw_standings):
+            medal = MEDALS[i] if i < 3 else f"#{i+1}"
+            delta = team['GW Points'] - gw_avg_pts
+            delta_str = f" (+{delta:.0f})" if delta >= 0 else f" ({delta:.0f})"
+            # Find overall season rank
+            overall_r = next(
+                (j + 1 for j, m in enumerate(
+                    sorted(mini_league_data['standings']['results'],
+                           key=lambda x: x.get('total', 0), reverse=True)
+                ) if m['entry_name'] == team['Team Name']),
+                "?"
+            )
+            m_data = next((m for m in mini_league_data['standings']['results']
+                           if m['entry_name'] == team['Team Name']), {})
+            chip = m_data.get('gameweek_data', {}).get(str(gameweek), {}).get('active_chip')
+            chip_str = f" {CHIP_EMOJI.get(chip, '🎮')}" if chip else ""
+            rows.append(f"{medal} {team['Team Name']}{chip_str} — {team['GW Points']}pts{delta_str} | Season #{overall_r}")
+
+        sections.append(header + "\n\n" + "\n".join(rows))
+    else:
+        # Live standings — show captain status so people know who's still to play
+        rows = []
+        for i, team in enumerate(gw_standings):
+            medal = MEDALS[i] if i < 3 else f"#{i+1}"
+            delta = team['GW Points'] - gw_avg_pts
+            delta_str = f" (+{delta:.0f})" if delta >= 0 else f" ({delta:.0f})"
+            # Find captain and their status
+            m_data = next((m for m in mini_league_data['standings']['results']
+                           if m['entry_name'] == team['Team Name']), {})
+            gw_pick_data = m_data.get('gameweek_data', {}).get(str(gameweek), {})
+            picks = gw_pick_data.get('picks', [])
+            cap = next((p for p in picks if p.get('is_captain')), None)
+            if cap:
+                cap_name = player_id_to_name.get(cap['element'], '?').split()[-1]
+                cap_status = play_status.get(cap['element'], 'upcoming') if play_status else 'unknown'
+                cap_icon = {'finished': '✓', 'playing': '⚡', 'upcoming': '⏳'}.get(cap_status, '?')
+                cap_str = f" | C:{cap_name}{cap_icon}"
+            else:
+                cap_str = ""
+            chip = gw_pick_data.get('active_chip')
+            chip_str = f" {CHIP_EMOJI.get(chip, '🎮')}" if chip else ""
+            rows.append(f"{medal} {team['Team Name']}{chip_str} — {team['GW Points']}pts{delta_str}{cap_str}")
+
+        _fin = gw_status.get('fixtures_finished', 0)
+        _live = gw_status.get('fixtures_in_progress', 0)
+        _tot = gw_status.get('total_fixtures', 10)
+        if _fin == 0 and _live == 0:
+            _status_tag = "not started yet"
+        elif _fin == 0:
+            _status_tag = f"{_live} game(s) in progress"
+        elif _live > 0:
+            _status_tag = f"{_fin}/{_tot} done · {_live} live"
+        else:
+            _status_tag = f"{_fin}/{_tot} games done"
+        header = f"🏁 GW{gameweek} LIVE — {_status_tag}"
+        sections.append(header + "\n" + "\n".join(rows))
+
+    # --- Highlights (fun facts) — only show if player has actually played ---
     highlights: list[str] = []
 
     if fun_facts.get('comeback'):
         cf = fun_facts['comeback']
         n = cf['change']
         word = "place" if n == 1 else "places"
-        highlights.append(f"📈 COMEBACK\n{cf['manager']} ⬆ {n} {word}")
+        highlights.append(f"📈 COMEBACK OF THE WEEK\n{cf['manager']} ⬆ {n} {word} in the table")
 
     if fun_facts.get('choke'):
         cf = fun_facts['choke']
         n = abs(cf['change'])
         word = "place" if n == 1 else "places"
-        highlights.append(f"📉 CHOKE\n{cf['manager']} ⬇ {n} {word}")
+        highlights.append(f"📉 CHOKE OF THE WEEK\n{cf['manager']} ⬇ {n} {word}")
 
     if fun_facts.get('captain_fail'):
         cf = fun_facts['captain_fail']
         highlights.append(
-            f"🤡 CAPTAIN FAIL\n"
-            f"{cf['manager']} (C) {cf['captain']} — {cf['points']} pts"
+            f"🤡 CAPTAIN DISASTER\n"
+            f"{cf['manager']} armband on {cf['captain']} — {cf['points']} pts. Painful."
         )
 
     if fun_facts.get('bench_hero'):
         cf = fun_facts['bench_hero']
         highlights.append(
-            f"🪑 BENCH HERO\n"
-            f"{cf['manager']} left {cf['player']} ({cf['points']} pts) on the bench"
+            f"🪑 LEFT ON THE BENCH\n"
+            f"{cf['manager']} watched {cf['player']} ({cf['points']} pts) warm the bench"
         )
 
     if fun_facts.get('differential_hero'):
         cf = fun_facts['differential_hero']
         highlights.append(
-            f"💎 DIFFERENTIAL\n"
-            f"{cf['manager']} rolled {cf['player']} "
-            f"({cf['points']} pts, {cf['ownership_pct']:.0f}% owned)"
+            f"💎 DIFFERENTIAL GENIUS\n"
+            f"{cf['manager']} went rogue with {cf['player']} "
+            f"({cf['points']} pts — only {cf['ownership_pct']:.0f}% of the league owns them)"
         )
+
+    # Show who still has captain to play (only in live mode)
+    if not is_final and play_status:
+        pending_caps = []
+        for m in mini_league_data['standings']['results']:
+            picks = m.get('gameweek_data', {}).get(str(gameweek), {}).get('picks', [])
+            cap = next((p for p in picks if p.get('is_captain')), None)
+            if cap and play_status.get(cap['element']) == 'upcoming':
+                cap_name = player_id_to_name.get(cap['element'], '?')
+                pending_caps.append(f"{m['entry_name'].split()[0]} (C: {cap_name})")
+        if pending_caps:
+            highlights.append(f"⏳ CAPTAINS YET TO PLAY\n" + " | ".join(pending_caps[:6]))
 
     if highlights:
         sections.append("\n\n".join(highlights))
 
+    # --- New analytics section ---
+    analytics_lines = []
+    if luck_data:
+        luckiest = luck_data[0]
+        unluckiest = luck_data[-1]
+        if abs(luckiest['luck']) > 3 or abs(unluckiest['luck']) > 3:
+            analytics_lines.append(
+                f"🍀 LUCK THIS GW\n"
+                f"Luckiest: {luckiest['manager']} (+{luckiest['luck']}pts over xPts)\n"
+                f"Unluckiest: {unluckiest['manager']} ({unluckiest['luck']}pts below xPts)"
+            )
+    if captaincy_regret_data:
+        worst_reg = next((r for r in captaincy_regret_data
+                          if not r.get('pending') and not r.get('is_same') and r['regret'] > 0), None)
+        nailed_it = next((r for r in reversed(captaincy_regret_data) if r.get('is_same')), None)
+        if worst_reg:
+            analytics_lines.append(
+                f"🤦 CAPTAIN REGRET\n"
+                f"{worst_reg['manager']} captained {worst_reg['actual_captain']} ({worst_reg['actual_pts']}pts) "
+                f"while {worst_reg['best_captain']} sat in their squad ({worst_reg['best_pts']}pts). "
+                f"That's {worst_reg['regret']}pts of pain."
+            )
+        if nailed_it:
+            analytics_lines.append(
+                f"✅ {nailed_it['manager']} nailed the captain pick — {nailed_it['actual_captain']} was the right call."
+            )
+    if transfer_regret_data:
+        worst_transfer = next((r for r in transfer_regret_data
+                               if r.get('worst') and r['worst']['regret'] > 5), None)
+        if worst_transfer:
+            w = worst_transfer['worst']
+            analytics_lines.append(
+                f"😬 TRANSFER REGRET\n"
+                f"{worst_transfer['manager']} sold {w['out']} for {w['in']} in GW{w['gw']}. "
+                f"{w['out']} then scored {w['out_pts']}pts vs {w['in']}'s {w['in_pts']}pts "
+                f"over {w['window_gws']} GWs. Ouch."
+            )
+    pot_data = []
+    for m_data in mini_league_data['standings']['results']:
+        name = m_data['entry_name']
+        gw_d = m_data.get('gameweek_data', {}).get(str(gameweek), {})
+        eh = gw_d.get('entry_history', {})
+        bench_pts = eh.get('points_on_bench', 0)
+        transfer_cost = eh.get('event_transfers_cost', 0)
+        cap_miss = max(0, next((r['regret'] for r in captaincy_regret_data if r['manager'] == name), 0))
+        total_lost = bench_pts + cap_miss + transfer_cost
+        if total_lost > 0:
+            pot_data.append({'manager': name, 'total': total_lost,
+                             'bench': bench_pts, 'cap': cap_miss, 'hit': transfer_cost})
+    pot_data.sort(key=lambda x: x['total'], reverse=True)
+    if pot_data and pot_data[0]['total'] >= 8:
+        top = pot_data[0]
+        analytics_lines.append(
+            f"💸 POINTS LEFT ON TABLE\n"
+            f"Biggest self-sabotage: {top['manager']} left {top['total']}pts on the table "
+            f"({top['bench']}pts bench + {top['cap']}pts captain miss + {top['hit']}pts hit)"
+        )
+    if is_final and archetypes:
+        archetype_lines = [f"{name}: {data['label']}" for name, data in archetypes.items()]
+        analytics_lines.append("🎭 MANAGER ARCHETYPES\n" + "\n".join(archetype_lines))
+
+    if analytics_lines:
+        sections.append("\n\n".join(analytics_lines))
+
     # --- AI-generated recap ------------------------------------------------
     if ai_insights and len(str(ai_insights).strip()) > 0:
-        sections.append(f"📰 {str(ai_insights).strip()}")
+        sections.append(f"📰 MATCH REPORT\n\n{str(ai_insights).strip()}")
         logger.info(f"AI insights added to message: {len(str(ai_insights))} characters")
     else:
         logger.warning(

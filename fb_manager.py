@@ -31,19 +31,41 @@ class FacebookManager:
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
         
+    @staticmethod
+    def _find_browser():
+        """Return (binary_path, driver_path) for the first usable Chrome/Chromium pair."""
+        import shutil, subprocess
+        candidates = [
+            ("google-chrome", None),
+            ("google-chrome-stable", None),
+            ("chromium-browser", None),
+            ("chromium", None),
+            ("/snap/bin/chromium", "/snap/bin/chromium.chromedriver"),
+            ("/usr/bin/chromium-browser", "/usr/bin/chromedriver"),
+        ]
+        for browser, driver in candidates:
+            binary = shutil.which(browser) or (browser if os.path.exists(browser) else None)
+            if not binary:
+                continue
+            drv = driver or shutil.which("chromedriver") or "/usr/bin/chromedriver"
+            if os.path.exists(drv):
+                return binary, drv
+        raise RuntimeError("No compatible Chrome/Chromium browser found for Selenium")
+
     def setup_driver(self, headless):
-        """Setup and return Chrome driver with options"""
+        """Setup and return Chrome driver with auto-detected browser."""
+        binary, drv_path = self._find_browser()
         chrome_options = Options()
         if headless:
-            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument(f"--user-data-dir={os.path.join(self.local_dir, 'chrome_user_data')}")
-        chrome_options.binary_location = "/usr/bin/chromium-browser"
-        
-        service = Service("/usr/bin/chromedriver")
+        chrome_options.binary_location = binary
+        logging.info(f"Using browser: {binary} | driver: {drv_path}")
+        service = Service(drv_path)
         return webdriver.Chrome(service=service, options=chrome_options)
 
     def check_if_logged_in(self):
