@@ -325,7 +325,7 @@ def _masthead(meta: dict) -> str:
         date_str = generated.upper()
     is_final = bool(meta.get("is_final"))
     status = "FINAL EDITION" if is_final else "LIVE UPDATE"
-    season = esc(meta.get("season_label") or "2025/26")
+    season = esc(meta.get("season_label") or "2026/27")
     n_mgr = esc(str(meta.get("num_managers", "")))
     gw_avg = fnum(meta.get("gw_average"), 1)
     return f"""
@@ -369,15 +369,16 @@ def _section_nav(meta: dict) -> str:
 </nav>"""
 
 
-def _hero(payload: dict, managers: List[dict]) -> str:
+def _hero(payload: dict, managers: List[dict], manager_photos: dict = None) -> str:
     path = payload.get("hero_image_path")
     leader = managers[0] if managers else {}
+    leader_name = leader.get("name", "GW Winner")
     if path and os.path.isfile(path):
         try:
             uri = _image_data_uri(path)
             caption = (
                 f"Gameweek {payload.get('meta', {}).get('gameweek', '')} winner: "
-                f"{esc(leader.get('name',''))} — {fnum(leader.get('gw_points'))} points"
+                f"{esc(leader_name)} — {fnum(leader.get('gw_points'))} points"
             )
             return f"""
 <div class="hero-img-wrap">
@@ -386,11 +387,27 @@ def _hero(payload: dict, managers: List[dict]) -> str:
 </div>"""
         except Exception:
             pass
-    name = esc(leader.get("name", "GW Winner"))
+    name = esc(leader_name)
     pts = fnum(leader.get("gw_points"))
     gw = esc(str(payload.get("meta", {}).get("gameweek", "")))
+
+    # Try to show manager's profile photo
+    photo_html = ""
+    photo_path = (manager_photos or {}).get(leader_name)
+    if photo_path and os.path.isfile(photo_path):
+        try:
+            uri = _image_data_uri(photo_path)
+            photo_html = f'<img class="hp-photo" src="{uri}" alt="{esc(leader_name)}">'
+        except Exception:
+            pass
+    if not photo_html:
+        # Initials fallback
+        initials = "".join(w[0].upper() for w in leader_name.split()[:2])
+        photo_html = f'<div class="hp-initials">{initials}</div>'
+
     return f"""
 <div class="hero-placeholder">
+  {photo_html}
   <div class="hp-score">{pts}</div>
   <div style="flex:1">
     <div class="hp-week">Gameweek {gw} Winner</div>
@@ -400,7 +417,7 @@ def _hero(payload: dict, managers: List[dict]) -> str:
 </div>"""
 
 
-def _lead_article(narrative: str, managers: List[dict]) -> str:
+def _lead_article(narrative: str, managers: List[dict], manager_photos: dict = None) -> str:
     headline, paras, verdicts, teaser = _parse_narrative(narrative)
     if not headline:
         headline = (managers[0].get("name", "This Week's Champion") + " Leads the Pack") if managers else "Weekly Report"
@@ -438,14 +455,28 @@ def _lead_article(narrative: str, managers: List[dict]) -> str:
 </aside>""")
             parts.append(f'<p class="article-para">{esc(p)}</p>')
 
-    # Manager verdicts grid
+    # Manager verdicts grid — match name to full manager name for photo lookup
+    name_map = {m.get("name", "").split()[0]: m.get("name", "") for m in managers}
     verdict_html = ""
     if verdicts:
         verdict_items = []
-        for name, text in verdicts:
+        for first_name, text in verdicts:
+            full_name = name_map.get(first_name, first_name)
+            photo_path = (manager_photos or {}).get(full_name)
+            av_html = ""
+            if photo_path and os.path.isfile(photo_path):
+                try:
+                    uri = _image_data_uri(photo_path)
+                    av_html = f'<img class="vd-avatar" src="{uri}" alt="{esc(first_name)}">'
+                except Exception:
+                    pass
+            if not av_html:
+                initials = "".join(w[0].upper() for w in full_name.split()[:2])
+                av_html = f'<span class="vd-initials">{initials}</span>'
             verdict_items.append(
                 f'<div class="verdict-item">'
-                f'<span class="verdict-name">{esc(name)}</span>'
+                f'<span class="vd-av-wrap">{av_html}</span>'
+                f'<span class="verdict-name">{esc(first_name)}</span>'
                 f'<span class="verdict-text">{esc(text)}</span>'
                 f'</div>'
             )
@@ -475,7 +506,7 @@ def _lead_article(narrative: str, managers: List[dict]) -> str:
 </div>"""
 
 
-def _league_table(managers: List[dict]) -> str:
+def _league_table(managers: List[dict], manager_photos: dict = None) -> str:
     rows = []
     for i, m in enumerate(managers):
         rank = m.get("rank", 0)
@@ -493,11 +524,24 @@ def _league_table(managers: List[dict]) -> str:
         hit = m.get("gw_hit", 0)
         hit_tag = f' <span class="hit-tag">-{hit}</span>' if hit else ""
         row_cls = "lt-leader" if leader else ("lt-alt" if i % 2 == 1 else "")
+        name = m.get("name", "")
+        # Small avatar
+        photo_path = (manager_photos or {}).get(name)
+        if photo_path and os.path.isfile(photo_path):
+            try:
+                uri = _image_data_uri(photo_path)
+                avatar_html = f'<img class="lt-avatar" src="{uri}" alt="{esc(name)}">'
+            except Exception:
+                initials = "".join(w[0].upper() for w in name.split()[:2])
+                avatar_html = f'<span class="lt-initials">{initials}</span>'
+        else:
+            initials = "".join(w[0].upper() for w in name.split()[:2])
+            avatar_html = f'<span class="lt-initials">{initials}</span>'
         rows.append(f"""
     <tr class="{row_cls}">
       <td class="lt-rk">{medal}</td>
       <td class="lt-mv">{mv_html}</td>
-      <td class="lt-nm">{esc(m.get('name',''))}{chip_tag}{hit_tag}</td>
+      <td class="lt-nm"><span class="lt-av-wrap">{avatar_html}</span>{esc(name)}{chip_tag}{hit_tag}</td>
       <td class="lt-num">{fnum(m.get('total_points'))}</td>
       <td class="lt-gw">{fnum(m.get('gw_points'))}</td>
     </tr>""")
@@ -548,7 +592,7 @@ def _captain_picks(managers: List[dict], manager_photos: dict) -> str:
 def _sidebar(managers: List[dict], manager_photos: dict) -> str:
     return f"""
 <aside class="sidebar">
-  <div class="sb-section">{_league_table(managers)}</div>
+  <div class="sb-section">{_league_table(managers, manager_photos)}</div>
   <div class="sb-section">{_captain_picks(managers, manager_photos)}</div>
 </aside>"""
 
@@ -740,7 +784,7 @@ def _intel(league: dict) -> str:
 def _footer(meta: dict) -> str:
     gw = meta.get("gameweek", "")
     league = esc(meta.get("league_name", ""))
-    season = esc(meta.get("season_label") or "2025/26")
+    season = esc(meta.get("season_label") or "2026/27")
     generated = meta.get("generated_at", "")
     return f"""
 <footer class="np-footer">
@@ -768,8 +812,8 @@ def render_report_html(payload: dict) -> str:
         f"""
 <div class="main-area">
   <div class="lead-col">
-    {_lead_article(narrative, managers)}
-    {_hero(payload, managers)}
+    {_lead_article(narrative, managers, manager_photos)}
+    {_hero(payload, managers, manager_photos)}
   </div>
   {_sidebar(managers, manager_photos)}
 </div>""",
@@ -957,6 +1001,19 @@ body {{
   font-size: 12.5px; line-height: 1.45; color: {INK};
   font-family: 'Source Serif 4', Georgia, serif;
   border-left: 2px solid {RULE}; padding-left: 6px;
+  display: flex; align-items: flex-start; gap: 6px;
+}}
+.vd-av-wrap {{ flex-shrink: 0; margin-top: 1px; }}
+.vd-avatar {{
+  width: 20px; height: 20px; border-radius: 50%;
+  object-fit: cover; border: 1px solid {RULE}; display: block;
+}}
+.vd-initials {{
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: {RULE}; color: {MUTED};
+  font-size: 7px; font-weight: 700;
+  font-family: 'Source Serif 4', Georgia, serif;
 }}
 .verdict-name {{
   font-weight: 700; color: {HEADLINE}; margin-right: 4px;
@@ -996,6 +1053,17 @@ body {{
   font-size: 48px; font-weight: 900; color: {HEADLINE};
   line-height: 1; flex-shrink: 0;
 }}
+.hp-photo {{
+  width: 64px; height: 64px; border-radius: 50%;
+  object-fit: cover; border: 2px solid {HEADLINE}; flex-shrink: 0;
+}}
+.hp-initials {{
+  width: 64px; height: 64px; border-radius: 50%;
+  background: {HEADLINE}; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 22px; font-weight: 700; flex-shrink: 0;
+}}
 .img-caption {{
   font-size: 11px; font-style: italic; color: {MUTED};
   padding: 4px 0 8px; border-bottom: 1px solid {RULE}; margin-bottom: 8px;
@@ -1028,7 +1096,20 @@ body {{
 .lt-leader td {{ background: #fffbea; font-weight: 700; }}
 .lt-rk {{ font-size: 13px; font-weight: 800; text-align: center; color: {INK}; min-width: 22px; }}
 .lt-mv {{ text-align: center; }}
-.lt-nm {{ font-size: 12px; font-weight: 600; color: {INK}; text-align: left; }}
+.lt-nm {{ font-size: 12px; font-weight: 600; color: {INK}; text-align: left; vertical-align: middle; }}
+.lt-av-wrap {{ display: inline-block; margin-right: 5px; vertical-align: middle; }}
+.lt-avatar {{
+  width: 22px; height: 22px; border-radius: 50%;
+  object-fit: cover; vertical-align: middle;
+  border: 1px solid {RULE};
+}}
+.lt-initials {{
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: {RULE}; color: {MUTED};
+  font-size: 8px; font-weight: 700; vertical-align: middle;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
 .lt-num {{ text-align: right; font-weight: 800; font-size: 13px; font-family: 'Courier New', monospace; }}
 .lt-gw {{ text-align: right; font-weight: 700; color: {HEADLINE}; font-family: 'Courier New', monospace; }}
 .mv-up {{ color: {UP}; font-weight: 800; font-size: 10px; }}
