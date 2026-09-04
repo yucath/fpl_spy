@@ -1,11 +1,6 @@
 """
-report_template.py — newspaper-style HTML report for the FPL mini-league.
-
-Entry point (stable):
-    render_report_html(payload: dict) -> str
-
-No external assets, no JS, no CDN. Pure inline HTML/CSS.
-Designed at 1200px fixed width.
+report_template.py — authentic broadsheet newspaper HTML report for FPL mini-league.
+Entry point: render_report_html(payload: dict) -> str
 """
 
 from __future__ import annotations
@@ -14,68 +9,32 @@ import base64
 import html
 import math
 import os
+import re
 from datetime import datetime
-from typing import Dict, List, Optional, Sequence
+from typing import List
 
-# --------------------------------------------------------------------------- #
-#  Design tokens — newspaper palette
-# --------------------------------------------------------------------------- #
-BG        = "#faf8f0"   # aged newsprint
-PAPER     = "#f5f2e8"   # slightly darker panel bg
-INK       = "#1a1a1a"   # primary text
-INK_2     = "#3a3a3a"   # secondary text
-MUTED     = "#6b6b6b"   # tertiary text
-RULE      = "#c8b89a"   # divider lines
-HEADLINE  = "#8b0000"   # dark red headline
-ACCENT    = "#c8960c"   # gold accent (pullquote rules, etc.)
-UP        = "#1a5c1a"   # green for rises
-DOWN      = "#8b0000"   # red for falls / negative
+# ── Design tokens ─────────────────────────────────────────────────────────── #
+BG       = "#f7f4ef"   # warm newsprint
+PAPER    = "#f0ede6"   # slightly darker panels
+INK      = "#111111"
+INK2     = "#3a3a3a"
+MUTED    = "#666666"
+RULE     = "#c0c0c0"   # column rules / table lines
+HEADLINE = "#8b0000"   # crimson
+ACCENT   = "#b8860b"   # gold
+UP       = "#1a5c1a"
+DOWN     = "#8b0000"
+TALT     = "#edeae3"   # table alternate row
+WHITE    = "#ffffff"
 
-# Series colours for multi-line chart
 SERIES_COLORS = [
-    "#8b0000", "#1a5c1a", "#1a3a8b", "#7b4f00", "#5a0072",
-    "#005f5f", "#7a1a00", "#004a24", "#003d7a", "#6b3d00",
-    "#4a006b", "#003838", "#5c1a00", "#1a4a00", "#00286b",
+    "#8b0000","#1a5c1a","#1a3a8b","#7b4f00","#5a0072",
+    "#005f5f","#7a1a00","#004a24","#003d7a","#6b3d00",
+    "#4a006b","#003838","#5c1a00","#1a4a00","#00286b",
 ]
 
 
-# --------------------------------------------------------------------------- #
-#  Helpers
-# --------------------------------------------------------------------------- #
-def _img_data_uri(path: str) -> str:
-    """Convert a local image to an inline base64 data URI."""
-    ext = os.path.splitext(path)[1].lower()
-    mime = "image/png" if ext == ".png" else "image/jpeg"
-    with open(path, "rb") as f:
-        data = base64.b64encode(f.read()).decode("ascii")
-    return f"data:{mime};base64,{data}"
-
-
-def _manager_avatar_html(name: str, manager_photos: dict, size: int = 40) -> str:
-    """Return <img> circular avatar if photo exists, else styled initials circle."""
-    photo_path = manager_photos.get(name) if manager_photos else None
-    if photo_path and os.path.exists(photo_path):
-        try:
-            uri = _img_data_uri(photo_path)
-            return (
-                f'<img src="{uri}" alt="{esc(name)}" '
-                f'style="width:{size}px;height:{size}px;border-radius:50%;'
-                f'object-fit:cover;border:2px solid {RULE};flex-shrink:0;">'
-            )
-        except Exception:
-            pass
-    # Fallback: initials circle
-    initials = "".join(w[0].upper() for w in name.split()[:2]) if name else "?"
-    colors = ["#8b0000","#1a5c1a","#1a3a8b","#7b4f00","#5a0072","#005f5f","#7a1a00","#004a24"]
-    bg = colors[hash(name) % len(colors)]
-    fs = max(10, size // 3)
-    return (
-        f'<div style="width:{size}px;height:{size}px;border-radius:50%;background:{bg};'
-        f'color:#fff;display:flex;align-items:center;justify-content:center;'
-        f'font-size:{fs}px;font-weight:800;flex-shrink:0;">{initials}</div>'
-    )
-
-
+# ── Helpers ───────────────────────────────────────────────────────────────── #
 def esc(x) -> str:
     return html.escape(str(x if x is not None else ""))
 
@@ -113,9 +72,47 @@ def _poly(xs, ys) -> str:
     return " ".join(f"{x:.2f},{y:.2f}" for x, y in zip(xs, ys))
 
 
-# --------------------------------------------------------------------------- #
-#  SVG charts
-# --------------------------------------------------------------------------- #
+def _initials(name: str) -> str:
+    parts = name.split()
+    return (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper()
+
+
+def _image_data_uri(path: str) -> str:
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "gif": "gif",
+            "webp": "webp"}.get(ext, "jpeg")
+    with open(path, "rb") as f:
+        data = base64.b64encode(f.read()).decode()
+    return f"data:image/{mime};base64,{data}"
+
+
+def _extract_pull_quote(text: str) -> str:
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    best = ""
+    for s in sentences:
+        s = s.strip()
+        if 60 <= len(s) <= 180 and not s.startswith("GW") and not s.startswith("Next week"):
+            best = s
+            break
+    if not best and sentences:
+        candidates = [s for s in sentences if 40 <= len(s) <= 200]
+        best = candidates[len(candidates) // 2] if candidates else (sentences[0] if sentences else "")
+    return best[:200] if best else ""
+
+
+def _parse_narrative(narrative: str):
+    lines = [l.strip() for l in narrative.strip().split("\n") if l.strip()]
+    if not lines:
+        return "", []
+    raw_head = lines[0]
+    if ":" in raw_head[:10]:
+        raw_head = raw_head.split(":", 1)[1].strip()
+    raw_head = raw_head.rstrip("!")
+    paras = lines[1:]
+    return raw_head, paras
+
+
+# ── SVG charts ────────────────────────────────────────────────────────────── #
 def sparkline(values, w: int = 200, h: int = 44, color: str = HEADLINE) -> str:
     vals = _pts(values)
     if not vals:
@@ -145,7 +142,7 @@ def sparkline(values, w: int = 200, h: int = 44, color: str = HEADLINE) -> str:
     )
 
 
-def race_chart(managers: List[dict], w: int = 1100, h: int = 360, mode: str = "rank") -> str:
+def race_chart(managers: List[dict], w: int = 1100, h: int = 340, mode: str = "rank") -> str:
     gws = None
     for m in managers:
         g = (m.get("season") or {}).get("gws") or []
@@ -166,21 +163,18 @@ def race_chart(managers: List[dict], w: int = 1100, h: int = 360, mode: str = "r
     if mode == "rank":
         n_mgr = len(managers)
         vmin, vmax = 1, max(2, n_mgr)
-
         def sy(v):
             return pad_t + plot_h * (v - vmin) / ((vmax - vmin) or 1)
         y_ticks = sorted({1, max(1, n_mgr // 2), n_mgr})
     else:
         allc = [c for m in managers for c in ((m.get("season") or {}).get("cumulative") or [])]
         vmin, vmax = (min(allc), max(allc)) if allc else (0, 1)
-
         def sy(v):
             return pad_t + plot_h - plot_h * (v - vmin) / ((vmax - vmin) or 1)
         step = max(1, round((vmax - vmin) / 4))
         y_ticks = list(range(int(vmin), int(vmax) + 1, step))
 
-    out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">']
-    # grid lines
+    out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="background:{BG}">']
     for t in y_ticks:
         yy = sy(t)
         out.append(
@@ -249,12 +243,27 @@ def race_chart(managers: List[dict], w: int = 1100, h: int = 360, mode: str = "r
     return "".join(out)
 
 
-# --------------------------------------------------------------------------- #
-#  Section builders
-# --------------------------------------------------------------------------- #
-def render_masthead(meta: dict) -> str:
+# ── Section builders ──────────────────────────────────────────────────────── #
+
+def _edition_bar(meta: dict) -> str:
+    gw = meta.get("gameweek", "?")
+    generated = meta.get("generated_at", "")
+    try:
+        dt = datetime.strptime(generated, "%Y-%m-%d %H:%M")
+        date_str = dt.strftime("%A, %d %B %Y")
+    except Exception:
+        date_str = generated
+    return (
+        f'<div class="edition-bar">Vol.&nbsp;{esc(str(gw))},&nbsp;No.&nbsp;1'
+        f'&nbsp;&nbsp;|&nbsp;&nbsp;{esc(date_str)}'
+        f'&nbsp;&nbsp;|&nbsp;&nbsp;Est.&nbsp;2024'
+        f'&nbsp;&nbsp;|&nbsp;&nbsp;FREE</div>'
+    )
+
+
+def _masthead(meta: dict) -> str:
     league = esc(meta.get("league_name", "FPL Mini-League"))
-    gw = esc(meta.get("gameweek", ""))
+    gw = esc(str(meta.get("gameweek", "")))
     generated = meta.get("generated_at", "")
     try:
         dt = datetime.strptime(generated, "%Y-%m-%d %H:%M")
@@ -262,634 +271,807 @@ def render_masthead(meta: dict) -> str:
     except Exception:
         date_str = generated.upper()
     is_final = bool(meta.get("is_final"))
-    status = "FINAL" if is_final else "LIVE UPDATE"
-    managers = meta.get("num_managers", "")
-    gw_avg = fnum(meta.get("gw_average"), 1)
+    status = "FINAL EDITION" if is_final else "LIVE UPDATE"
     season = esc(meta.get("season_label") or "2025/26")
+    n_mgr = esc(str(meta.get("num_managers", "")))
+    gw_avg = fnum(meta.get("gw_average"), 1)
     return f"""
 <header class="masthead">
-  <div class="masthead-rule top-rule"></div>
-  <div class="masthead-inner">
-    <div class="masthead-meta-left">
-      <div class="mast-kicker">FANTASY PREMIER LEAGUE · MINI-LEAGUE REPORT</div>
+  <div class="mast-rule-thick"></div>
+  <div class="mast-inner">
+    <div class="mast-side mast-left">
+      <div>FANTASY PREMIER LEAGUE</div>
+      <div>MINI-LEAGUE REPORT</div>
       <div class="mast-season">SEASON {season}</div>
     </div>
-    <div class="masthead-title">
-      <div class="mast-name">{league}</div>
-      <div class="mast-sub">THE GAZETTE</div>
+    <div class="mast-center">
+      <div class="mast-league">{league}</div>
+      <div class="mast-gazette">THE GAZETTE</div>
     </div>
-    <div class="masthead-meta-right">
-      <div class="mast-date">{date_str}</div>
-      <div class="mast-gw">GAMEWEEK {gw} &nbsp;·&nbsp; {status}</div>
-      <div class="mast-stats">{managers} managers · avg {gw_avg} pts</div>
+    <div class="mast-side mast-right">
+      <div>{date_str}</div>
+      <div class="mast-status">GW {gw} &nbsp;&middot;&nbsp; {status}</div>
+      <div>{n_mgr} managers &nbsp;&middot;&nbsp; avg {gw_avg} pts</div>
     </div>
   </div>
-  <div class="masthead-rule"></div>
-  <div class="masthead-rule thin-rule"></div>
+  <div class="mast-rule-thick"></div>
+  <div class="mast-rule-thin"></div>
 </header>"""
 
 
-def render_banner(managers: List[dict], narrative: str, hero_image_path: str = None) -> str:
-    """Big headline + optional DALL-E hero image banner."""
-    if not managers:
-        return ""
-    leader = managers[0]
-    first_line = ""
-    if narrative:
-        first_line = narrative.strip().split("\n")[0].strip()
-        if first_line and ":" in first_line[:8]:
-            first_line = first_line.split(":", 1)[1].strip()
-    if not first_line:
-        first_line = f"{esc(leader.get('name',''))} leads the pack"
+def _section_nav(meta: dict) -> str:
+    gw = meta.get("gameweek", "?")
+    is_final = bool(meta.get("is_final"))
+    status_cls = "nav-final" if is_final else "nav-live"
+    status_txt = "FINAL" if is_final else "LIVE"
+    return f"""
+<nav class="section-nav">
+  <span class="section-pill">SPORT</span>
+  <span class="nav-sep">&middot;</span>
+  <span class="nav-item">FPL ANALYSIS</span>
+  <span class="nav-sep">&middot;</span>
+  <span class="nav-item">GAMEWEEK {esc(str(gw))}</span>
+  <span class="nav-sep">&middot;</span>
+  <span class="{status_cls}">{status_txt}</span>
+</nav>"""
 
-    # Hero image block
-    hero_html = ""
-    if hero_image_path and os.path.exists(hero_image_path):
+
+def _hero(payload: dict, managers: List[dict]) -> str:
+    path = payload.get("hero_image_path")
+    leader = managers[0] if managers else {}
+    if path and os.path.isfile(path):
         try:
-            uri = _img_data_uri(hero_image_path)
-            hero_html = f"""
-  <div style="border:2px solid {INK};margin:12px 0;overflow:hidden;max-height:260px;">
-    <img src="{uri}" alt="Gameweek hero" style="width:100%;max-height:260px;object-fit:cover;display:block;">
-  </div>
-  <div style="font-size:11px;font-style:italic;color:{MUTED};text-align:center;margin-bottom:8px;">
-    AI-generated: GW winner illustration
-  </div>"""
+            uri = _image_data_uri(path)
+            caption = (
+                f"Gameweek {payload.get('meta', {}).get('gameweek', '')} winner: "
+                f"{esc(leader.get('name',''))} — {fnum(leader.get('gw_points'))} points"
+            )
+            return f"""
+<div class="hero-img-wrap">
+  <img class="hero-img" src="{uri}" alt="GW Hero">
+  <div class="img-caption">{caption}</div>
+</div>"""
         except Exception:
             pass
+    name = esc(leader.get("name", "GW Winner"))
+    pts = fnum(leader.get("gw_points"))
+    gw = esc(str(payload.get("meta", {}).get("gameweek", "")))
+    return f"""
+<div class="hero-placeholder">
+  <div class="hp-week">GAMEWEEK {gw} WINNER</div>
+  <div class="hp-name">{name}</div>
+  <div class="hp-pts">{pts} points</div>
+</div>
+<div class="img-caption">Illustration: FPL Spy Analytics Desk &middot; Season 2025/26</div>"""
 
-    if not hero_html:
-        # Styled placeholder
-        hero_html = f"""
-  <div style="border:2px solid {INK};margin:12px 0;padding:32px;text-align:center;
-              background:{PAPER};background-image:repeating-linear-gradient(
-                45deg,transparent,transparent 10px,rgba(0,0,0,.03) 10px,rgba(0,0,0,.03) 20px);">
-    <div style="font-size:11px;letter-spacing:3px;color:{MUTED};text-transform:uppercase;margin-bottom:8px;">GW Winner</div>
-    <div style="font-size:36px;font-weight:900;color:{HEADLINE};font-family:Georgia,serif;">{esc(leader.get('name',''))}</div>
-    <div style="font-size:18px;color:{INK_2};margin-top:6px;">{fnum(leader.get('gw_points'))} pts this gameweek</div>
-  </div>"""
+
+def _lead_article(narrative: str, managers: List[dict]) -> str:
+    headline, paras = _parse_narrative(narrative)
+    if not headline:
+        headline = (managers[0].get("name", "This Week's Champion") + " Leads the Pack") if managers else "Weekly Report"
+    leader = managers[0] if managers else {}
+    last_gw = ""
+    gws = (leader.get("season") or {}).get("gws") or []
+    if gws:
+        last_gw = str(gws[-1])
+    deck = (
+        f"{esc(leader.get('name',''))} storms to {fnum(leader.get('gw_points'))} points"
+        + (f" in Gameweek {last_gw}" if last_gw else "")
+        + ", delivering the highest score as drama unfolds across the Pullman Football Samaj mini-league."
+    )
+
+    full_body = " ".join(paras)
+    pull = _extract_pull_quote(full_body)
+    mid = max(1, len(paras) // 2)
+
+    parts = []
+    for i, p in enumerate(paras):
+        if i == 0:
+            first_char = esc(p[0]) if p else ""
+            rest = esc(p[1:]) if len(p) > 1 else ""
+            parts.append(
+                f'<p class="article-para first-para">'
+                f'<span class="dateline">PULLMAN, W.A. &mdash;</span>&nbsp;'
+                f'<span class="drop">{first_char}</span>{rest}</p>'
+            )
+        else:
+            if i == mid and pull:
+                parts.append(f"""
+<aside class="pull-quote">
+  <div class="pq-open">&#8220;</div>
+  <p class="pq-text">{esc(pull)}</p>
+  <div class="pq-close">&#8221;</div>
+</aside>""")
+            parts.append(f'<p class="article-para">{esc(p)}</p>')
 
     return f"""
-<div class="banner">
-  <div class="banner-rule"></div>
-  <h1 class="banner-headline">{esc(first_line)}</h1>
-  <div class="banner-deck">
-    GW{esc(leader.get('season',{}).get('gws',['?'])[-1] if leader.get('season',{}).get('gws') else '?')}
-    LEADER: <strong>{esc(leader.get('name',''))}</strong>
-    · {fnum(leader.get('total_points'))} pts total
-    · {fnum(leader.get('gw_points'))} this week
-  </div>
-  {hero_html}
-  <div class="banner-rule"></div>
-</div>"""
-
-
-def render_three_col(managers: List[dict], league: dict, narrative: str,
-                     player_photos: dict = None, manager_photos: dict = None) -> str:
-    """Three-column layout: league table | captain picks | match report."""
-    return f"""
-<div class="three-col">
-  <div class="col-left">
-    {_league_table(managers)}
-  </div>
-  <div class="col-mid">
-    {_captain_column(managers, player_photos or {}, manager_photos or {})}
-  </div>
-  <div class="col-right">
-    {_match_report(narrative)}
+<div class="lead-article">
+  <span class="section-flag">SPORT</span>
+  <h1 class="headline">{esc(headline)}</h1>
+  <p class="deck">{deck}</p>
+  <div class="byline">By the FPL Analytics Desk <span class="byline-sep">|</span> Published this week</div>
+  <div class="byline-rule"></div>
+  <div class="article-body">
+    {''.join(parts)}
+    <p class="continued">Continued on page 2 &#8594;</p>
   </div>
 </div>"""
 
 
 def _league_table(managers: List[dict]) -> str:
     rows = []
-    for m in managers:
+    for i, m in enumerate(managers):
         rank = m.get("rank", 0)
         leader = rank == 1
-        mv = (m.get("last_rank") or m.get("prev_rank") or rank) - rank
+        mv = (m.get("prev_rank") or rank) - rank
         if mv > 0:
-            mv_html = f'<span class="mv-up">▲</span>'
+            mv_html = '<span class="mv-up">&#9650;</span>'
         elif mv < 0:
-            mv_html = f'<span class="mv-dn">▼</span>'
+            mv_html = '<span class="mv-dn">&#9660;</span>'
         else:
-            mv_html = '<span class="mv-flat">—</span>'
-        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "")
+            mv_html = '<span class="mv-flat">&mdash;</span>'
+        medal = {1: "&#127949;", 2: "&#127950;", 3: "&#127951;"}.get(rank, str(rank))
         chip = m.get("chip")
-        chip_tag = f'<span class="lt-chip">{esc(chip[:2].upper())}</span>' if chip else ""
+        chip_tag = (f' <span class="chip-tag">{esc(chip[:2].upper())}</span>') if chip else ""
         hit = m.get("gw_hit", 0)
-        hit_tag = f'<span class="lt-hit">-{hit}</span>' if hit else ""
+        hit_tag = f' <span class="hit-tag">-{hit}</span>' if hit else ""
+        row_cls = "lt-leader" if leader else ("lt-alt" if i % 2 == 1 else "")
         rows.append(f"""
-    <tr class="{'lt-leader' if leader else ''}">
-      <td class="lt-rk">{medal or rank}</td>
+    <tr class="{row_cls}">
+      <td class="lt-rk">{medal}</td>
       <td class="lt-mv">{mv_html}</td>
-      <td class="lt-nm">{esc(m.get('name',''))} {chip_tag}{hit_tag}</td>
-      <td class="lt-tot">{fnum(m.get('total_points'))}</td>
+      <td class="lt-nm">{esc(m.get('name',''))}{chip_tag}{hit_tag}</td>
+      <td class="lt-num">{fnum(m.get('total_points'))}</td>
       <td class="lt-gw">{fnum(m.get('gw_points'))}</td>
     </tr>""")
     return f"""
-<div class="col-head">LEAGUE TABLE</div>
+<div class="sb-head">LEAGUE TABLE</div>
 <table class="lt">
   <thead><tr>
-    <th>#</th><th></th><th>Manager</th><th>Total</th><th>GW</th>
+    <th class="lt-rk">#</th><th></th><th>Manager</th>
+    <th class="lt-num">Total</th><th class="lt-gw">GW</th>
   </tr></thead>
   <tbody>{''.join(rows)}</tbody>
 </table>"""
 
 
-def _captain_column(managers: List[dict], player_photos: dict, manager_photos: dict = None) -> str:
+def _captain_picks(managers: List[dict], manager_photos: dict) -> str:
     rows = []
-    for m in managers[:8]:
+    for m in managers[:10]:
+        name = m.get("name", "")
         cap = m.get("captain") or "—"
         cap_pts = m.get("captain_points")
         pts_str = f"{cap_pts}" if cap_pts is not None else "?"
         chip = m.get("chip")
-        chip_tag = f' <span class="lt-chip">{esc(chip[:2].upper() if chip else "")}</span>' if chip else ""
-        avatar = _manager_avatar_html(m.get("name", ""), manager_photos or {}, size=36)
+        chip_tag = f' <span class="chip-tag">{esc(chip[:2].upper())}</span>' if chip else ""
+        good = (cap_pts or 0) >= 10
+        photo_path = (manager_photos or {}).get(name)
+        if photo_path and os.path.isfile(photo_path):
+            try:
+                uri = _image_data_uri(photo_path)
+                avatar = f'<img class="mgr-avatar" src="{uri}" alt="{esc(name)}">'
+            except Exception:
+                avatar = f'<div class="mgr-initial">{esc(_initials(name))}</div>'
+        else:
+            avatar = f'<div class="mgr-initial">{esc(_initials(name))}</div>'
         rows.append(f"""
-    <div class="cap-row" style="gap:8px;">
-      {avatar}
-      <div class="cap-info">
-        <div class="cap-mgr">{esc(m.get('name',''))}{chip_tag}</div>
-        <div class="cap-player">© {esc(cap)}</div>
-      </div>
-      <div class="cap-pts {'cap-good' if (cap_pts or 0) >= 10 else 'cap-meh'}">{pts_str}pts</div>
-    </div>""")
+  <div class="cap-row">
+    {avatar}
+    <div class="cap-info">
+      <div class="cap-mgr">{esc(name)}{chip_tag}</div>
+      <div class="cap-player">&#169; {esc(cap)}</div>
+    </div>
+    <div class="cap-pts {'cap-good' if good else 'cap-meh'}">{pts_str}pts</div>
+  </div>""")
     return f"""
-<div class="col-head">CAPTAIN PICKS</div>
+<div class="sb-head">CAPTAIN PICKS</div>
 <div class="cap-list">{''.join(rows)}</div>"""
 
 
-def _match_report(narrative: str) -> str:
-    if not narrative or not narrative.strip():
-        return '<div class="col-head">MATCH REPORT</div><p class="no-narrative">No report available.</p>'
-    paras = [p.strip() for p in narrative.split("\n") if p.strip()]
-    # skip first line — used as banner headline
-    body_paras = paras[1:] if len(paras) > 1 else paras
-    parts = []
-    for i, p in enumerate(body_paras):
-        if i == 0:
-            # drop-cap on first real paragraph
-            first_char = esc(p[0]) if p else ""
-            rest = esc(p[1:]) if len(p) > 1 else ""
-            parts.append(f'<p class="report-para dropcap"><span class="drop">{first_char}</span>{rest}</p>')
-        else:
-            parts.append(f'<p class="report-para">{esc(p)}</p>')
+def _sidebar(managers: List[dict], manager_photos: dict) -> str:
     return f"""
-<div class="col-head">MATCH REPORT</div>
-{''.join(parts)}"""
+<aside class="sidebar">
+  <div class="sb-section">{_league_table(managers)}</div>
+  <div class="sb-section">{_captain_picks(managers, manager_photos)}</div>
+</aside>"""
 
 
-def render_stats_strip(managers: List[dict], league: dict) -> str:
-    """Four stat boxes: GW winner | Biggest riser | Bench pain | Captain of the week."""
+def _divider(label: str = "") -> str:
+    if label:
+        return (
+            f'<div class="section-divider">'
+            f'<span class="div-rule"></span>'
+            f'<span class="div-label">{esc(label)}</span>'
+            f'<span class="div-rule"></span>'
+            f'</div>'
+        )
+    return '<div class="section-divider-plain"></div>'
+
+
+def _stats_strip(managers: List[dict], league: dict) -> str:
     gw_top = sorted(managers, key=lambda m: m.get("gw_points", 0) or 0, reverse=True)
     gw_winner = gw_top[0] if gw_top else {}
-    riser = league.get("biggest_riser")
+    riser = league.get("biggest_riser") or {}
+    faller = league.get("biggest_faller") or {}
     bench_lb = (league.get("bench_leaderboard") or [])
     bench_top = bench_lb[0] if bench_lb else {}
-    # captain of the week: manager with highest captain points
     cap_best = max(managers, key=lambda m: m.get("captain_points", 0) or 0, default={})
 
-    def stat_box(emoji, kicker, name, stat, sub):
-        return f"""
-    <div class="stat-box">
-      <div class="stat-emoji">{emoji}</div>
-      <div class="stat-kicker">{esc(kicker)}</div>
-      <div class="stat-name">{esc(name)}</div>
-      <div class="stat-value">{esc(stat)}</div>
-      <div class="stat-sub">{esc(sub)}</div>
-    </div>"""
-
-    gw_pts = fnum(gw_winner.get("gw_points"))
-    riser_html = stat_box(
-        "📈", "BIGGEST RISER",
-        (riser or {}).get("name", "—"),
-        f'+{(riser or {}).get("change", 0)} place(s)',
-        "moved up this week"
-    ) if riser else stat_box("📈", "BIGGEST RISER", "—", "—", "no movement")
+    def box(emoji, kicker, name, value, sub):
+        return (
+            f'<div class="stat-box">'
+            f'<div class="stat-emoji">{emoji}</div>'
+            f'<div class="stat-kicker">{esc(kicker)}</div>'
+            f'<div class="stat-name">{esc(name)}</div>'
+            f'<div class="stat-value">{esc(value)}</div>'
+            f'<div class="stat-sub">{esc(sub)}</div>'
+            f'</div>'
+        )
 
     return f"""
-<div class="stats-strip">
-  {stat_box("⚡", "GW TOP SCORER", gw_winner.get('name',''), f'{gw_pts} pts', f'© {esc(gw_winner.get("captain",""))}')}
-  {riser_html}
-  {stat_box("🪑", "BENCH PAIN KING", bench_top.get('name','—'), f'{fnum(bench_top.get("season_bench","—"))} pts', 'season bench points')}
-  {stat_box("🎯", "BEST CAPTAIN", cap_best.get('name','—'), f'{fnum(cap_best.get("captain_points","—"))} pts', f'© {esc(cap_best.get("captain",""))}')}
-</div>"""
-
-
-def render_race_section(managers: List[dict]) -> str:
-    svg = race_chart(managers, mode="rank")
-    if not svg:
-        return ""
-    return f"""
-<section class="np-section">
-  <div class="np-section-head">
-    <span class="np-head-rule"></span>
-    <span class="np-head-title">THE SEASON RACE</span>
-    <span class="np-head-rule"></span>
+<section class="stats-section">
+  {_divider("STATS DESK")}
+  <div class="stats-grid">
+    {box("&#9889;", "GW Top Scorer", gw_winner.get('name','—'), f'{fnum(gw_winner.get("gw_points"))} pts', f'Capt: {gw_winner.get("captain","—")}')}
+    {box("&#128200;", "Biggest Riser", riser.get('name','—'), f'+{riser.get("change",0)} places', 'moved up this week')}
+    {box("&#127919;", "Best Captain", cap_best.get('name','—'), f'{fnum(cap_best.get("captain_points","—"))} pts', f'Capt: {cap_best.get("captain","—")}')}
+    {box("&#129681;", "Bench Pain King", bench_top.get('name','—'), f'{fnum(bench_top.get("season_bench","—"))} pts', 'season bench points left')}
   </div>
-  <div class="chart-box">{svg}</div>
-  <div class="chart-caption">Mini-league position after each gameweek · 1st place at top</div>
 </section>"""
 
 
-def render_manager_cards(managers: List[dict], manager_photos: dict = None) -> str:
+def _manager_dossiers(managers: List[dict], manager_photos: dict) -> str:
     cards = []
     for idx, m in enumerate(managers):
         color = SERIES_COLORS[idx % len(SERIES_COLORS)]
         s = m.get("season") or {}
-        spark = sparkline(s.get("net_points") or [], w=180, h=40, color=color)
+        spark = sparkline(s.get("net_points") or [], w=160, h=36, color=color)
         rank = m.get("rank", 0)
         gw_pts = m.get("gw_points", 0)
         cap = m.get("captain") or "—"
         cap_pts = m.get("captain_points", 0) or 0
         cap_cls = "cap-good" if cap_pts >= 10 else ("cap-meh" if cap_pts >= 6 else "cap-bad")
-        avatar = _manager_avatar_html(m.get("name", ""), manager_photos or {}, size=44)
         chip = m.get("chip")
-        chip_html = f'<span class="mc-chip">{esc(chip)}</span>' if chip else ""
+        chip_html = f'<span class="chip-tag">{esc(chip)}</span>' if chip else ""
         hit = m.get("gw_hit", 0)
-        hit_html = f'<span class="mc-hit">-{hit}pt</span>' if hit else ""
-        bench = m.get("bench_points") or 0
+        hit_html = f'<span class="hit-tag">-{hit}pt</span>' if hit else ""
         or_rank = compact_rank(m.get("overall_rank"))
+        bench = m.get("bench_points") or 0
+        archetype = m.get("archetype") or ""
+        arch_html = f'<div class="mc-arch">{esc(archetype)}</div>' if archetype else ""
+        name = m.get("name", "")
+        photo_path = (manager_photos or {}).get(name)
+        if photo_path and os.path.isfile(photo_path):
+            try:
+                uri = _image_data_uri(photo_path)
+                avatar = f'<img class="mc-avatar" src="{uri}" alt="{esc(name)}">'
+            except Exception:
+                avatar = f'<div class="mc-initial" style="background:{color}">{esc(_initials(name))}</div>'
+        else:
+            avatar = f'<div class="mc-initial" style="background:{color}">{esc(_initials(name))}</div>'
+
+        tags = (chip_html + (" " if chip_html and hit_html else "") + hit_html) or "&nbsp;"
         cards.append(f"""
-    <div class="mc" style="border-top-color:{color}">
-      <div class="mc-top">
-        {avatar}
-        <div class="mc-id">
-          <div class="mc-name">{esc(m.get('name',''))}</div>
-          <div class="mc-team">{esc(m.get('team_name',''))}</div>
-        </div>
-        <div class="mc-gwv" style="color:{color}">{fnum(gw_pts)}</div>
+  <div class="mc" style="border-top:3px solid {color}">
+    <div class="mc-header">
+      {avatar}
+      <div class="mc-id">
+        <div class="mc-rank" style="color:{color}">#{rank}</div>
+        <div class="mc-name">{esc(name)}</div>
+        <div class="mc-team">{esc(m.get('team_name',''))}</div>
       </div>
-      <div class="mc-tags">{chip_html}{hit_html}</div>
-      <div class="mc-spark">{spark}</div>
-      <div class="mc-stats">
-        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v {cap_cls}">© {esc(cap)} · {cap_pts}pts</span></div>
-        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">{fnum(bench)} pts</span></div>
-        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">{fnum(m.get('total_points'))} pts</span></div>
-        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">{or_rank}</span></div>
-      </div>
-    </div>""")
+      <div class="mc-gwv" style="color:{color}">{fnum(gw_pts)}</div>
+    </div>
+    {arch_html}
+    <div class="mc-tags">{tags}</div>
+    <div class="mc-spark">{spark}<div class="spark-cap">GW points trend</div></div>
+    <table class="mc-stats">
+      <tr><td class="mcs-k">Captain</td><td class="mcs-v {cap_cls}">&#169;&nbsp;{esc(cap)}&nbsp;&middot;&nbsp;{cap_pts}pts</td></tr>
+      <tr class="mc-alt"><td class="mcs-k">Bench</td><td class="mcs-v">{fnum(bench)} pts</td></tr>
+      <tr><td class="mcs-k">Season</td><td class="mcs-v">{fnum(m.get('total_points'))} pts</td></tr>
+      <tr class="mc-alt"><td class="mcs-k">Global</td><td class="mcs-v">{or_rank}</td></tr>
+    </table>
+  </div>""")
+
     return f"""
-<section class="np-section">
-  <div class="np-section-head">
-    <span class="np-head-rule"></span>
-    <span class="np-head-title">MANAGER DOSSIERS</span>
-    <span class="np-head-rule"></span>
-  </div>
+<section class="dossier-section">
+  {_divider("THIS WEEK'S SQUADS")}
   <div class="mc-grid">{''.join(cards)}</div>
 </section>"""
 
 
-def render_intel(league: dict) -> str:
-    power = (league.get("power_rankings") or [])[:8]
-    cap_trends = (league.get("captaincy_trends") or [])[:5]
-    rivalries = (league.get("rivalries") or [])[:5]
+def _race_section(managers: List[dict]) -> str:
+    svg = race_chart(managers, mode="rank")
+    if not svg:
+        return ""
+    return f"""
+<section class="race-section">
+  {_divider("THE SEASON RACE")}
+  <div class="chart-wrap">{svg}</div>
+  <div class="img-caption">Mini-league position after each gameweek &middot; 1st place at top</div>
+</section>"""
 
-    # Power rankings
+
+def _intel(league: dict) -> str:
+    power = (league.get("power_rankings") or [])[:8]
+    cap_trends = (league.get("captaincy_trends") or [])[:8]
+    rivalries = (league.get("rivalries") or [])[:6]
+
     pw_rows = ""
-    for p in power:
+    for i, p in enumerate(power):
         delta = p.get("delta", 0)
         if delta >= 2:
-            arrow = f'<span class="mv-up">▲{delta}</span>'
+            arrow = f'<span class="mv-up">&#9650;{delta}</span>'
         elif delta <= -2:
-            arrow = f'<span class="mv-dn">▼{abs(delta)}</span>'
+            arrow = f'<span class="mv-dn">&#9660;{abs(delta)}</span>'
         else:
-            arrow = '<span class="mv-flat">—</span>'
-        pw_rows += f"""
-    <div class="intel-row">
-      <span class="intel-rank">#{esc(p['power_rank'])}</span>
-      <span class="intel-name">{esc(p['name'])}</span>
-      <span class="intel-val">{esc(p['score'])}</span>
-      {arrow}
-    </div>"""
+            arrow = '<span class="mv-flat">&mdash;</span>'
+        alt = ' class="mc-alt"' if i % 2 == 1 else ""
+        pw_rows += (
+            f'<tr{alt}><td class="intel-rank">#{esc(str(p.get("power_rank","")))}</td>'
+            f'<td class="intel-name">{esc(p.get("name",""))}</td>'
+            f'<td class="intel-score">{esc(str(p.get("score","")))}</td>'
+            f'<td style="text-align:center">{arrow}</td></tr>'
+        )
 
-    # Captaincy trends
     cap_rows = ""
     max_cnt = cap_trends[0]["count"] if cap_trends else 1
     for t in cap_trends:
         pct = t["count"] / max_cnt * 100
-        pts = f'{t["gw_pts"]}pts' if t.get("gw_pts") else "—"
-        cap_rows += f"""
-    <div class="ct-row">
-      <div class="ct-name">{esc(t['player'])}</div>
-      <div class="ct-bar-wrap"><div class="ct-bar" style="width:{pct:.0f}%"></div></div>
-      <div class="ct-meta">{esc(t['pct'])}% · {esc(pts)}</div>
-    </div>"""
+        pts = f'{t["gw_pts"]}pts' if t.get("gw_pts") is not None else "—"
+        cap_rows += (
+            f'<div class="ct-row">'
+            f'<div class="ct-name">{esc(t.get("player",""))}</div>'
+            f'<div class="ct-bar-wrap"><div class="ct-bar" style="width:{pct:.0f}%"></div></div>'
+            f'<div class="ct-meta">{esc(str(t.get("pct","")))}% &middot; {esc(pts)}</div>'
+            f'</div>'
+        )
 
-    # Rivalries
     rv_rows = ""
     for r in rivalries:
-        rv_rows += f"""
-    <div class="rv-row">
-      <span class="rv-a">{esc(r['leader'])}</span>
-      <span class="rv-gap">+{esc(r['gap'])}pts ahead</span>
-      <span class="rv-b">{esc(r['chaser'])}</span>
-    </div>"""
+        rv_rows += (
+            f'<div class="rv-row">'
+            f'<span class="rv-a">{esc(r.get("leader",""))}</span>'
+            f'<span class="rv-gap">+{esc(str(r.get("gap","")))} pts</span>'
+            f'<span class="rv-b">{esc(r.get("chaser",""))}</span>'
+            f'</div>'
+        )
 
     return f"""
-<section class="np-section">
-  <div class="np-section-head">
-    <span class="np-head-rule"></span>
-    <span class="np-head-title">LEAGUE INTEL</span>
-    <span class="np-head-rule"></span>
-  </div>
+<section class="intel-section">
+  {_divider("LEAGUE INTEL")}
   <div class="intel-grid">
     <div class="intel-panel">
-      <div class="intel-panel-head">POWER RANKINGS <span class="intel-note">form-weighted</span></div>
-      {pw_rows}
+      <div class="intel-head">POWER RANKINGS <span class="intel-note">form-weighted</span></div>
+      <table class="intel-table">
+        <thead><tr><th>#</th><th>Manager</th><th>Score</th><th></th></tr></thead>
+        <tbody>{pw_rows}</tbody>
+      </table>
     </div>
     <div class="intel-panel">
-      <div class="intel-panel-head">CAPTAINCY TRENDS</div>
-      {cap_rows}
+      <div class="intel-head">CAPTAINCY TRENDS</div>
+      <div class="ct-list">{cap_rows}</div>
     </div>
     <div class="intel-panel">
-      <div class="intel-panel-head">CLOSEST RIVALRIES</div>
-      {rv_rows}
+      <div class="intel-head">CLOSEST RIVALRIES</div>
+      <div class="rv-list">{rv_rows}</div>
     </div>
   </div>
 </section>"""
 
 
-def render_footer(meta: dict) -> str:
-    season = meta.get("season_label") or ""
-    seg = f" · {esc(season)}" if season else ""
+def _footer(meta: dict) -> str:
     gw = meta.get("gameweek", "")
     league = esc(meta.get("league_name", ""))
+    season = esc(meta.get("season_label") or "2025/26")
     generated = meta.get("generated_at", "")
     return f"""
 <footer class="np-footer">
-  <div class="footer-rule"></div>
+  <div class="footer-thick"></div>
   <div class="footer-inner">
-    <span>{league} · Gameweek {esc(str(gw))}{seg}</span>
-    <span class="footer-right">Generated {esc(generated)} · FPL Spy automated report</span>
+    <span>{league} &middot; The Gazette &middot; Vol. {esc(str(gw))}, No. 1</span>
+    <span class="footer-center">&#10022; FPL SPY AUTOMATED REPORT &#10022;</span>
+    <span class="footer-right">Season {season} &middot; Generated {esc(generated)}</span>
   </div>
 </footer>"""
 
 
-# --------------------------------------------------------------------------- #
-#  Master entry point
-# --------------------------------------------------------------------------- #
+# ── Master entry point ────────────────────────────────────────────────────── #
 def render_report_html(payload: dict) -> str:
     meta = payload.get("meta") or {}
     managers = payload.get("managers") or []
     league = payload.get("league") or {}
     narrative = payload.get("narrative") or ""
-    player_photos = payload.get("player_photos") or {}
-    hero_image_path = payload.get("hero_image_path")
     manager_photos = payload.get("manager_photos") or {}
 
-    body = "".join([
-        render_masthead(meta),
-        render_banner(managers, narrative, hero_image_path=hero_image_path),
-        render_three_col(managers, league, narrative, player_photos, manager_photos=manager_photos),
-        render_stats_strip(managers, league),
-        render_race_section(managers),
-        render_manager_cards(managers, manager_photos=manager_photos),
-        render_intel(league),
-        render_footer(meta),
+    body = "\n".join([
+        _edition_bar(meta),
+        _masthead(meta),
+        _section_nav(meta),
+        f"""
+<div class="main-area">
+  <div class="lead-col">
+    {_lead_article(narrative, managers)}
+    {_hero(payload, managers)}
+  </div>
+  {_sidebar(managers, manager_photos)}
+</div>""",
+        _stats_strip(managers, league),
+        _manager_dossiers(managers, manager_photos),
+        _race_section(managers),
+        _intel(league),
+        _footer(meta),
     ])
 
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>FPL Report – GW{meta.get('gameweek','')}</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1200">
+<title>FPL Gazette &mdash; GW{esc(str(meta.get('gameweek','')))}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
 <style>{CSS}</style>
 </head>
 <body>
 <div class="page">{body}</div>
-</body></html>"""
+</body>
+</html>"""
 
 
-# --------------------------------------------------------------------------- #
-#  CSS — newspaper style
-# --------------------------------------------------------------------------- #
+# ── CSS ───────────────────────────────────────────────────────────────────── #
 CSS = f"""
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 html, body {{ background: {BG}; color: {INK}; }}
 body {{
   width: 1200px; margin: 0 auto;
-  font-family: Georgia, "Times New Roman", Times, serif;
+  font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
   font-size: 15px; line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }}
-.page {{ width: 1200px; padding: 28px 40px 40px; }}
+.page {{ padding: 0 40px 48px; }}
 
-/* ---- Masthead ---- */
-.masthead {{ margin-bottom: 18px; }}
-.masthead-rule {{ height: 4px; background: {INK}; margin: 4px 0; }}
-.top-rule {{ height: 8px; }}
-.thin-rule {{ height: 1px; margin-top: 2px; }}
-.masthead-inner {{
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0;
-}}
-.masthead-meta-left, .masthead-meta-right {{
-  font-size: 10px; letter-spacing: 0.8px; color: {MUTED};
-  text-transform: uppercase; line-height: 1.6; min-width: 200px;
-}}
-.masthead-meta-right {{ text-align: right; }}
-.mast-kicker {{ font-weight: 700; color: {INK_2}; }}
-.masthead-title {{ text-align: center; flex: 1; }}
-.mast-name {{
-  font-size: 42px; font-weight: 900; letter-spacing: -1px; line-height: 1;
-  color: {INK};
-}}
-.mast-sub {{
-  font-size: 11px; letter-spacing: 5px; color: {MUTED}; margin-top: 3px;
-  text-transform: uppercase;
-}}
-.mast-gw {{ font-weight: 700; color: {HEADLINE}; }}
-.mast-stats {{ font-size: 10px; color: {MUTED}; }}
-
-/* ---- Banner ---- */
-.banner {{ margin-bottom: 18px; }}
-.banner-rule {{ height: 2px; background: {RULE}; margin: 6px 0; }}
-.banner-headline {{
-  font-size: 34px; font-weight: 900; line-height: 1.1; color: {HEADLINE};
-  text-align: center; padding: 6px 0;
-  text-transform: uppercase; letter-spacing: -0.5px;
-}}
-.banner-deck {{
-  text-align: center; font-size: 13px; color: {INK_2}; letter-spacing: 0.3px;
-  margin-top: 4px; font-style: italic;
+/* ── Edition bar ── */
+.edition-bar {{
+  font-size: 10px; letter-spacing: 0.9px; color: {MUTED};
+  text-align: center; padding: 5px 0 4px;
+  border-bottom: 1px solid {RULE}; text-transform: uppercase;
+  font-family: 'Source Serif 4', Georgia, serif;
 }}
 
-/* ---- Three-column layout ---- */
-.three-col {{
-  display: grid; grid-template-columns: 320px 240px 1fr;
-  gap: 0; margin-bottom: 18px;
-  border: 1px solid {RULE};
+/* ── Masthead ── */
+.masthead {{ margin-bottom: 0; }}
+.mast-rule-thick {{ height: 5px; background: {INK}; margin: 6px 0; }}
+.mast-rule-thin {{ height: 1px; background: {RULE}; margin: 2px 0 0; }}
+.mast-inner {{
+  display: grid; grid-template-columns: 210px 1fr 210px;
+  align-items: center; padding: 12px 0 8px;
 }}
-.col-left {{ border-right: 1px solid {RULE}; padding: 16px 14px; }}
-.col-mid {{ border-right: 1px solid {RULE}; padding: 16px 14px; }}
-.col-right {{ padding: 16px 16px; }}
-.col-head {{
-  font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
-  color: {MUTED}; border-bottom: 2px solid {INK}; padding-bottom: 5px; margin-bottom: 10px;
+.mast-side {{
+  font-size: 9.5px; letter-spacing: 0.9px; text-transform: uppercase;
+  color: {MUTED}; line-height: 1.75;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.mast-right {{ text-align: right; }}
+.mast-season {{ color: {INK2}; font-weight: 600; }}
+.mast-status {{ color: {HEADLINE}; font-weight: 700; }}
+.mast-center {{ text-align: center; }}
+.mast-league {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 54px; font-weight: 900; letter-spacing: -1.5px;
+  line-height: 1; color: {INK}; text-transform: uppercase;
+}}
+.mast-gazette {{
+  font-size: 12px; letter-spacing: 6px; color: {MUTED}; margin-top: 4px;
+  text-transform: uppercase; font-family: 'Source Serif 4', Georgia, serif;
 }}
 
-/* ---- League table ---- */
-.lt {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+/* ── Section nav ── */
+.section-nav {{
+  display: flex; align-items: center; gap: 10px;
+  font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase;
+  color: {MUTED}; padding: 6px 0;
+  border-top: 2px solid {INK}; border-bottom: 1px solid {RULE};
+  margin-bottom: 22px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.section-pill {{
+  background: {INK}; color: {BG}; padding: 2px 8px;
+  font-size: 9px; letter-spacing: 1.5px; font-weight: 700;
+}}
+.nav-sep {{ color: {RULE}; }}
+.nav-item {{ color: {INK2}; }}
+.nav-final {{ color: {HEADLINE}; font-weight: 700; }}
+.nav-live {{ color: #1a5c1a; font-weight: 700; }}
+
+/* ── Main two-column ── */
+.main-area {{
+  display: grid; grid-template-columns: 1fr 290px;
+  gap: 0; margin-bottom: 24px;
+}}
+.lead-col {{ padding-right: 28px; border-right: 1px solid {RULE}; }}
+.sidebar {{ padding-left: 22px; }}
+
+/* ── Lead article ── */
+.section-flag {{
+  display: inline-block; font-size: 9px; letter-spacing: 1.5px;
+  text-transform: uppercase; font-weight: 700; color: {BG};
+  background: {HEADLINE}; padding: 2px 8px; margin-bottom: 10px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.headline {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 46px; font-weight: 900; line-height: 1.06;
+  color: {HEADLINE}; margin-bottom: 10px;
+}}
+.deck {{
+  font-size: 17px; font-style: italic; color: {INK2};
+  line-height: 1.45; margin-bottom: 10px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.byline {{
+  font-size: 10.5px; font-variant: small-caps; letter-spacing: 0.7px;
+  color: {MUTED}; margin-bottom: 6px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.byline-sep {{ margin: 0 6px; color: {RULE}; }}
+.byline-rule {{ height: 1px; background: {RULE}; margin-bottom: 14px; }}
+.article-body {{
+  column-count: 2; column-gap: 24px;
+  column-rule: 1px solid {RULE};
+}}
+.article-para {{
+  font-size: 14.5px; line-height: 1.68; color: {INK};
+  text-align: justify; hyphens: auto; margin-bottom: 12px;
+  break-inside: avoid;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.first-para {{ margin-top: 0; }}
+.dateline {{
+  font-size: 11px; font-variant: small-caps; letter-spacing: 0.5px;
+  font-weight: 600; color: {INK};
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.drop {{
+  float: left;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 70px; font-weight: 900; line-height: 0.78;
+  color: {HEADLINE}; margin: 4px 6px 0 0; padding-top: 4px;
+}}
+.continued {{
+  font-size: 11px; font-style: italic; color: {MUTED};
+  text-align: right; margin-top: 8px; break-inside: avoid;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.pull-quote {{
+  border-top: 2px solid {ACCENT}; border-bottom: 2px solid {ACCENT};
+  padding: 10px 8px; margin: 16px 0;
+  text-align: center; break-inside: avoid;
+  column-span: all; background: {PAPER};
+}}
+.pq-open, .pq-close {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 44px; line-height: 0.7; color: {HEADLINE};
+  display: block;
+}}
+.pq-close {{ text-align: right; }}
+.pq-text {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 19px; font-style: italic; color: {INK};
+  line-height: 1.42; margin: 4px 0;
+}}
+
+/* ── Hero ── */
+.hero-img-wrap {{ margin: 18px 0 4px; border: 1px solid {RULE}; }}
+.hero-img {{ display: block; width: 100%; max-height: 250px; object-fit: cover; }}
+.hero-placeholder {{
+  background: {PAPER}; border: 1px solid {RULE};
+  border-left: 5px solid {HEADLINE}; padding: 30px 24px;
+  margin: 18px 0 4px; text-align: center;
+}}
+.hp-week {{
+  font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  color: {MUTED}; margin-bottom: 8px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.hp-name {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 34px; font-weight: 900; color: {HEADLINE}; line-height: 1.1;
+}}
+.hp-pts {{
+  font-size: 17px; color: {INK2}; font-style: italic; margin-top: 6px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.img-caption {{
+  font-size: 11px; font-style: italic; color: {MUTED};
+  padding: 4px 0 8px; border-bottom: 1px solid {RULE}; margin-bottom: 8px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+
+/* ── Sidebar ── */
+.sb-section {{ margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid {RULE}; }}
+.sb-section:last-child {{ border-bottom: none; }}
+.sb-head {{
+  font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  font-weight: 700; color: {MUTED}; border-bottom: 2px solid {INK};
+  padding-bottom: 5px; margin-bottom: 10px;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+
+/* ── League table ── */
+.lt {{ width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: 'Source Serif 4', Georgia, serif; }}
 .lt thead tr {{ border-bottom: 1px solid {RULE}; }}
 .lt th {{
-  font-size: 10px; letter-spacing: 0.8px; color: {MUTED}; text-transform: uppercase;
-  font-weight: 700; padding: 3px 4px; text-align: right;
+  font-size: 9px; letter-spacing: 0.8px; color: {MUTED};
+  text-transform: uppercase; font-weight: 700; padding: 3px 4px;
+  text-align: right;
 }}
 .lt th:nth-child(3) {{ text-align: left; }}
 .lt td {{ padding: 5px 4px; vertical-align: middle; border-bottom: 1px solid {RULE}; }}
 .lt tbody tr:last-child td {{ border-bottom: none; }}
+.lt-alt td {{ background: {TALT}; }}
 .lt-leader td {{ background: #fffbea; font-weight: 700; }}
-.lt-rk {{ font-size: 16px; font-weight: 800; text-align: center; color: {INK}; }}
+.lt-rk {{ font-size: 13px; font-weight: 800; text-align: center; color: {INK}; min-width: 22px; }}
 .lt-mv {{ text-align: center; }}
-.lt-nm {{ font-size: 13px; font-weight: 600; color: {INK}; }}
-.lt-tot {{ text-align: right; font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; }}
-.lt-gw {{ text-align: right; font-weight: 700; color: {HEADLINE}; font-variant-numeric: tabular-nums; }}
-.lt-chip {{
-  font-size: 9px; font-weight: 800; background: #e8e0ff; color: #4a00a0;
-  border-radius: 3px; padding: 1px 4px; vertical-align: middle; margin-left: 2px;
+.lt-nm {{ font-size: 12px; font-weight: 600; color: {INK}; text-align: left; }}
+.lt-num {{ text-align: right; font-weight: 800; font-size: 13px; font-family: 'Courier New', monospace; }}
+.lt-gw {{ text-align: right; font-weight: 700; color: {HEADLINE}; font-family: 'Courier New', monospace; }}
+.mv-up {{ color: {UP}; font-weight: 800; font-size: 10px; }}
+.mv-dn {{ color: {DOWN}; font-weight: 800; font-size: 10px; }}
+.mv-flat {{ color: {MUTED}; font-size: 10px; }}
+.chip-tag {{
+  font-size: 8px; font-weight: 800; background: #e8e0ff; color: #4a00a0;
+  border-radius: 2px; padding: 1px 3px; margin-left: 2px; vertical-align: middle;
 }}
-.lt-hit {{
-  font-size: 9px; font-weight: 800; background: #ffe0e0; color: {HEADLINE};
-  border-radius: 3px; padding: 1px 4px; vertical-align: middle; margin-left: 2px;
+.hit-tag {{
+  font-size: 8px; font-weight: 800; background: #ffe0e0; color: {HEADLINE};
+  border-radius: 2px; padding: 1px 3px; margin-left: 2px; vertical-align: middle;
 }}
-.mv-up {{ color: {UP}; font-weight: 800; font-size: 11px; }}
-.mv-dn {{ color: {DOWN}; font-weight: 800; font-size: 11px; }}
-.mv-flat {{ color: {MUTED}; font-size: 11px; }}
 
-/* ---- Captain column ---- */
-.cap-list {{ display: flex; flex-direction: column; gap: 8px; }}
+/* ── Captain picks ── */
+.cap-list {{ display: flex; flex-direction: column; gap: 0; }}
 .cap-row {{
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   padding: 6px 0; border-bottom: 1px solid {RULE};
 }}
 .cap-row:last-child {{ border-bottom: none; }}
-.cap-mgr {{ font-size: 12px; font-weight: 700; color: {INK}; }}
-.cap-player {{ font-size: 11px; color: {MUTED}; margin-top: 1px; }}
-.cap-pts {{ font-size: 16px; font-weight: 800; text-align: right; min-width: 44px; }}
+.mgr-avatar, .mgr-initial {{
+  width: 30px; height: 30px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0;
+}}
+.mgr-initial {{
+  background: {INK2}; color: {BG}; display: flex; align-items: center;
+  justify-content: center; font-size: 11px; font-weight: 800;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.cap-info {{ flex: 1; min-width: 0; }}
+.cap-mgr {{ font-size: 11.5px; font-weight: 700; color: {INK}; font-family: 'Source Serif 4', Georgia, serif; }}
+.cap-player {{ font-size: 10.5px; color: {MUTED}; font-style: italic; font-family: 'Source Serif 4', Georgia, serif; }}
+.cap-pts {{
+  font-size: 14px; font-weight: 800; text-align: right; min-width: 42px;
+  font-family: 'Courier New', monospace;
+}}
 .cap-good {{ color: {UP}; }}
-.cap-meh {{ color: {INK_2}; }}
-
-/* ---- Match report ---- */
-.report-para {{
-  font-size: 14px; line-height: 1.65; color: {INK}; margin-bottom: 10px;
-  text-align: justify; hyphens: auto;
-}}
-.report-para.dropcap {{ margin-top: 4px; }}
-.drop {{
-  float: left; font-size: 52px; line-height: 0.78; font-weight: 900; color: {HEADLINE};
-  margin: 4px 6px -2px 0; font-family: Georgia, serif;
-}}
-.no-narrative {{ color: {MUTED}; font-style: italic; font-size: 13px; }}
-
-/* ---- Stats strip ---- */
-.stats-strip {{
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  gap: 0; border: 1px solid {RULE}; margin-bottom: 18px;
-}}
-.stat-box {{
-  padding: 16px 16px; border-right: 1px solid {RULE}; text-align: center;
-}}
-.stat-box:last-child {{ border-right: none; }}
-.stat-emoji {{ font-size: 24px; margin-bottom: 4px; }}
-.stat-kicker {{ font-size: 9px; letter-spacing: 1.5px; color: {MUTED}; text-transform: uppercase; font-weight: 700; }}
-.stat-name {{ font-size: 14px; font-weight: 800; color: {INK}; margin-top: 4px; }}
-.stat-value {{ font-size: 22px; font-weight: 900; color: {HEADLINE}; margin-top: 2px; }}
-.stat-sub {{ font-size: 10px; color: {MUTED}; margin-top: 2px; }}
-
-/* ---- Section header ---- */
-.np-section {{ margin-bottom: 22px; }}
-.np-section-head {{
-  display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
-}}
-.np-head-rule {{ flex: 1; height: 2px; background: {RULE}; }}
-.np-head-title {{
-  font-size: 11px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase;
-  color: {INK_2}; white-space: nowrap;
-}}
-
-/* ---- Race chart ---- */
-.chart-box {{
-  border: 1px solid {RULE}; padding: 12px; background: {PAPER};
-  overflow-x: auto;
-}}
-.chart-caption {{ font-size: 10px; color: {MUTED}; text-align: center; margin-top: 6px; }}
-
-/* ---- Manager cards ---- */
-.mc-grid {{
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-}}
-.mc {{
-  border: 1px solid {RULE}; border-top: 3px solid; background: {PAPER};
-  padding: 12px 12px 10px;
-}}
-.mc-top {{ display: flex; align-items: center; gap: 10px; }}
-.mc-rank {{ font-size: 24px; font-weight: 900; }}
-.mc-id {{ flex: 1; min-width: 0; }}
-.mc-name {{ font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.mc-team {{ font-size: 10px; color: {MUTED}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.mc-gwv {{ font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }}
-.mc-tags {{ display: flex; gap: 5px; flex-wrap: wrap; margin: 6px 0 4px; font-size: 10px; }}
-.mc-chip {{
-  background: #e8e0ff; color: #4a00a0; border-radius: 3px;
-  padding: 1px 5px; font-weight: 800;
-}}
-.mc-hit {{
-  background: #ffe0e0; color: {HEADLINE}; border-radius: 3px;
-  padding: 1px 5px; font-weight: 800;
-}}
-.mc-spark {{ margin: 4px 0; }}
-.mc-stats {{ margin-top: 6px; border-top: 1px solid {RULE}; padding-top: 6px; display: flex; flex-direction: column; gap: 3px; }}
-.mcs {{ display: flex; justify-content: space-between; font-size: 11px; }}
-.mcs-k {{ color: {MUTED}; }}
-.mcs-v {{ font-weight: 700; text-align: right; }}
-.cap-good {{ color: {UP}; }}
+.cap-meh {{ color: {INK2}; }}
 .cap-bad {{ color: {DOWN}; }}
-.cap-meh {{ color: {INK_2}; }}
 
-/* ---- Intel section ---- */
-.intel-grid {{
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 0; border: 1px solid {RULE};
+/* ── Section dividers ── */
+.section-divider {{
+  display: flex; align-items: center; gap: 14px; margin: 20px 0 16px;
 }}
-.intel-panel {{ padding: 14px 14px; border-right: 1px solid {RULE}; }}
+.div-rule {{ flex: 1; height: 2px; background: {RULE}; }}
+.div-label {{
+  font-size: 11px; font-weight: 700; letter-spacing: 2.5px;
+  text-transform: uppercase; color: {INK2}; white-space: nowrap;
+  font-family: 'Source Serif 4', Georgia, serif;
+}}
+.section-divider-plain {{ height: 3px; background: {INK}; margin: 24px 0 20px; }}
+
+/* ── Stats strip ── */
+.stats-section {{ margin-bottom: 24px; }}
+.stats-grid {{
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border: 1px solid {RULE};
+}}
+.stat-box {{ padding: 18px 16px; border-right: 1px solid {RULE}; text-align: center; }}
+.stat-box:last-child {{ border-right: none; }}
+.stat-emoji {{ font-size: 22px; margin-bottom: 5px; }}
+.stat-kicker {{
+  font-size: 9px; letter-spacing: 1.5px; color: {MUTED}; text-transform: uppercase;
+  font-weight: 700; margin-bottom: 5px; font-family: 'Source Serif 4', Georgia, serif;
+}}
+.stat-name {{ font-size: 13px; font-weight: 700; color: {INK}; margin-bottom: 3px; font-family: 'Source Serif 4', Georgia, serif; }}
+.stat-value {{
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 24px; font-weight: 900; color: {HEADLINE}; margin-bottom: 2px;
+}}
+.stat-sub {{ font-size: 10px; color: {MUTED}; font-style: italic; font-family: 'Source Serif 4', Georgia, serif; }}
+
+/* ── Manager dossiers ── */
+.dossier-section {{ margin-bottom: 28px; }}
+.mc-grid {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }}
+.mc {{
+  background: {BG}; border: 1px solid {RULE};
+  padding: 12px 10px 10px; font-family: 'Source Serif 4', Georgia, serif;
+}}
+.mc-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
+.mc-avatar, .mc-initial {{
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover;
+}}
+.mc-initial {{
+  display: flex; align-items: center; justify-content: center;
+  color: {WHITE}; font-size: 13px; font-weight: 800;
+}}
+.mc-id {{ flex: 1; min-width: 0; }}
+.mc-rank {{ font-size: 17px; font-weight: 900; line-height: 1; margin-bottom: 1px; font-family: 'Playfair Display', Georgia, serif; }}
+.mc-name {{ font-size: 12px; font-weight: 700; color: {INK}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.mc-team {{ font-size: 9.5px; color: {MUTED}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }}
+.mc-gwv {{ font-family: 'Playfair Display', Georgia, serif; font-size: 22px; font-weight: 900; flex-shrink: 0; }}
+.mc-arch {{ font-size: 9px; letter-spacing: 0.8px; color: {ACCENT}; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; font-style: italic; }}
+.mc-tags {{ display: flex; gap: 4px; flex-wrap: wrap; font-size: 9.5px; margin-bottom: 4px; min-height: 14px; }}
+.mc-spark {{ margin: 4px 0 2px; overflow: hidden; }}
+.spark-cap {{ font-size: 9px; color: {MUTED}; font-style: italic; margin-top: 1px; }}
+.mc-stats {{ width: 100%; border-collapse: collapse; margin-top: 6px; border-top: 1px solid {RULE}; font-size: 10.5px; }}
+.mc-stats tr {{ border-bottom: 1px solid {RULE}; }}
+.mc-stats tr:last-child {{ border-bottom: none; }}
+.mc-alt {{ background: {TALT}; }}
+.mcs-k {{ color: {MUTED}; padding: 3px 4px; font-size: 9.5px; width: 45%; }}
+.mcs-v {{ font-weight: 700; padding: 3px 4px; text-align: right; font-family: 'Courier New', monospace; font-size: 10px; }}
+
+/* ── Race chart ── */
+.race-section {{ margin-bottom: 28px; }}
+.chart-wrap {{ border: 1px solid {RULE}; overflow-x: auto; background: {BG}; }}
+
+/* ── Intel ── */
+.intel-section {{ margin-bottom: 28px; }}
+.intel-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid {RULE}; }}
+.intel-panel {{ padding: 16px 14px; border-right: 1px solid {RULE}; font-family: 'Source Serif 4', Georgia, serif; }}
 .intel-panel:last-child {{ border-right: none; }}
-.intel-panel-head {{
-  font-size: 10px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
-  color: {INK_2}; border-bottom: 1px solid {RULE}; padding-bottom: 6px; margin-bottom: 10px;
+.intel-head {{
+  font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: {INK2}; border-bottom: 2px solid {INK}; padding-bottom: 6px; margin-bottom: 10px;
 }}
-.intel-note {{ font-weight: 500; color: {MUTED}; letter-spacing: 0; }}
-.intel-row {{
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 0; border-bottom: 1px solid {RULE}; font-size: 12px;
+.intel-note {{ font-weight: 500; color: {MUTED}; letter-spacing: 0; text-transform: none; }}
+.intel-table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+.intel-table thead tr {{ border-bottom: 1px solid {RULE}; }}
+.intel-table th {{
+  font-size: 9px; letter-spacing: 0.7px; color: {MUTED}; text-transform: uppercase;
+  font-weight: 700; padding: 2px 4px; text-align: left;
 }}
-.intel-row:last-child {{ border-bottom: none; }}
-.intel-rank {{ font-weight: 800; color: {MUTED}; min-width: 24px; }}
-.intel-name {{ flex: 1; font-weight: 600; }}
-.intel-val {{ font-weight: 800; color: {HEADLINE}; min-width: 36px; text-align: right; }}
-/* Captaincy bars */
-.ct-row {{ display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 12px; }}
-.ct-row:last-child {{ margin-bottom: 0; }}
-.ct-name {{ font-weight: 600; min-width: 90px; }}
-.ct-bar-wrap {{ flex: 1; background: {RULE}; border-radius: 2px; height: 8px; overflow: hidden; }}
+.intel-table td {{ padding: 5px 4px; border-bottom: 1px solid {RULE}; }}
+.intel-table tbody tr:last-child td {{ border-bottom: none; }}
+.intel-rank {{ color: {MUTED}; font-weight: 800; font-size: 11px; white-space: nowrap; }}
+.intel-name {{ font-weight: 600; }}
+.intel-score {{ font-family: 'Courier New', monospace; font-weight: 700; color: {HEADLINE}; text-align: right; }}
+.ct-list {{ display: flex; flex-direction: column; gap: 8px; }}
+.ct-row {{ display: flex; align-items: center; gap: 8px; font-size: 11.5px; }}
+.ct-name {{ font-weight: 600; min-width: 75px; font-size: 11px; }}
+.ct-bar-wrap {{ flex: 1; background: {RULE}; border-radius: 2px; height: 7px; overflow: hidden; }}
 .ct-bar {{ height: 100%; background: {HEADLINE}; border-radius: 2px; }}
-.ct-meta {{ font-size: 10px; color: {MUTED}; white-space: nowrap; min-width: 70px; text-align: right; }}
-/* Rivalries */
+.ct-meta {{ font-size: 10px; color: {MUTED}; white-space: nowrap; min-width: 65px; text-align: right; font-family: 'Courier New', monospace; }}
+.rv-list {{ display: flex; flex-direction: column; gap: 0; }}
 .rv-row {{
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 0; border-bottom: 1px solid {RULE}; font-size: 12px;
+  padding: 6px 0; border-bottom: 1px solid {RULE}; font-size: 12px;
 }}
 .rv-row:last-child {{ border-bottom: none; }}
-.rv-a {{ font-weight: 700; flex: 1; }}
+.rv-a {{ font-weight: 700; flex: 1; font-size: 11.5px; }}
 .rv-gap {{
   font-size: 10px; font-weight: 800; background: #fffbea; border: 1px solid {ACCENT};
-  border-radius: 3px; padding: 1px 5px; white-space: nowrap; color: {ACCENT};
+  border-radius: 2px; padding: 1px 5px; white-space: nowrap; color: {ACCENT};
+  font-family: 'Courier New', monospace;
 }}
-.rv-b {{ font-size: 11px; color: {MUTED}; flex: 1; text-align: right; }}
+.rv-b {{ font-size: 10.5px; color: {MUTED}; flex: 1; text-align: right; font-style: italic; }}
 
-/* ---- Footer ---- */
-.np-footer {{ margin-top: 20px; }}
-.footer-rule {{ height: 3px; background: {INK}; margin-bottom: 2px; }}
+/* ── Footer ── */
+.np-footer {{ margin-top: 24px; font-family: 'Source Serif 4', Georgia, serif; }}
+.footer-thick {{ height: 5px; background: {INK}; margin-bottom: 2px; }}
 .footer-inner {{
-  display: flex; justify-content: space-between; font-size: 10px;
-  color: {MUTED}; padding: 4px 0; letter-spacing: 0.5px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10px; color: {MUTED}; padding: 5px 0;
+  letter-spacing: 0.5px; text-transform: uppercase;
 }}
+.footer-center {{ font-size: 12px; color: {INK2}; letter-spacing: 3px; }}
 .footer-right {{ text-align: right; }}
 """
