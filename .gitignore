@@ -19,6 +19,9 @@ facebook_cookies.pkl
 # Browser profile (Selenium)
 chrome_user_data/
 
+# Manager photos (private, not committed)
+photos/
+
 # Generated runtime data
 player_data/
 league_data/
