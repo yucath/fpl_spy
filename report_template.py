@@ -117,20 +117,32 @@ def _parse_narrative(narrative: str):
     VERDICT_MARKERS = {"MANAGER VERDICTS", "VERDICTS", "MANAGER VERDICT", "PLAYER VERDICTS"}
     TEASER_MARKERS = {"NEXT WEEK TEASER", "NEXT WEEK", "TEASER", "SUSPENSE CLOSER", "CLOSING"}
 
-    raw_head = lines[0]
-    if ":" in raw_head[:10]:
-        raw_head = raw_head.split(":", 1)[1].strip()
-    raw_head = raw_head.rstrip("!")
-    # If the first line looks like a full sentence (long or has a full stop), treat
-    # it as body text and synthesise a short headline from the first few words.
-    if len(raw_head) > 80 or ("." in raw_head and len(raw_head) > 40):
-        words = raw_head.split()
-        raw_head = " ".join(words[:6]).rstrip(".,;:") + "…"
+    # A real headline: short (≤80 chars), no mid-sentence period, ideally all-caps or
+    # title-cased. A story paragraph is long or has multiple sentences.
+    first_line = lines[0]
+    if ":" in first_line[:10]:
+        first_line = first_line.split(":", 1)[1].strip()
+    first_line = first_line.rstrip("!")
+
+    # Detect whether line 0 is a headline or the start of a story paragraph
+    _is_headline = (
+        len(first_line) <= 80
+        and not (". " in first_line and len(first_line) > 40)  # no mid-sentence stop
+        and not first_line[0].islower()  # doesn't start mid-sentence
+    )
+    if _is_headline:
+        raw_head = first_line
+        body_start = 1
+    else:
+        # First line is a story paragraph — keep it in body, leave headline empty
+        # so _lead_article falls back to the winner-based default
+        raw_head = ""
+        body_start = 0
 
     section = "story"
     story_paras, verdicts, teaser_lines = [], [], []
 
-    for line in lines[1:]:
+    for line in lines[body_start:]:
         upper = line.upper().strip(":-–—.")
         if upper in VERDICT_MARKERS or upper.startswith("MANAGER VERDICT"):
             section = "verdicts"

@@ -3206,7 +3206,9 @@ def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: 
             status_line = f"GW{gameweek} FINAL — all {total_fixtures} fixtures done."
             task = (
                 f"Write a FINAL match report for GW{gameweek} — structured EXACTLY as follows:\n\n"
-                "HEADLINE (1 sentence, all-caps, punchy and specific to this GW's biggest story)\n\n"
+                "HEADLINE: Write ONE short punchy headline (5-8 words max, Title Case, no full stop) "
+                "that captures the single biggest story of this GW — name the winner or the key moment. "
+                "Example: 'Santosh's Haaland Gamble Pays Off Brilliantly'. Put ONLY the headline on the very first line.\n\n"
                 "THE STORY (5-6 paragraphs, ~350 words total): This is the centrepiece — write it like a "
                 "real sports journalist covering a match. Tell the story of the WHOLE gameweek:\n"
                 "  Para 1 — How GW opened: who was leading early, which captains looked smart on Friday/Saturday, "
@@ -3247,7 +3249,9 @@ def generate_ai_insights(mini_league_data: Dict, gameweek: int, current_scores: 
             )
             task = (
                 f"Write a LIVE match-day update for GW{gameweek} — structured EXACTLY as follows:\n\n"
-                "HEADLINE (1 sentence, all-caps, captures the drama so far)\n\n"
+                "HEADLINE: Write ONE short punchy headline (5-8 words max, Title Case, no full stop) "
+                "capturing the biggest drama so far — who's leading, what's happened. "
+                "Example: 'Chaos at the Top as Captains Divide'. Put ONLY the headline on the very first line.\n\n"
                 "THE STORY (5-6 paragraphs, ~350 words): Tell the story of the gameweek SO FAR:\n"
                 f"  Para 1 — How GW{gameweek} opened: who looked sharp in early fixtures, which captains "
                 "were already paying off or bombing.\n"
