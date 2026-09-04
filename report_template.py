@@ -1,59 +1,44 @@
 """
-report_template.py — renders the report payload (see report.build_payload) to a
-standalone HTML string for headless-Chromium -> single tall PNG.
+report_template.py — newspaper-style HTML report for the FPL mini-league.
 
 Entry point (stable):
     render_report_html(payload: dict) -> str
 
-All charts are inline SVG computed in Python. No external assets, no JS.
-Designed at a fixed 1200px width; height unbounded (long infographic).
+No external assets, no JS, no CDN. Pure inline HTML/CSS.
+Designed at 1200px fixed width.
 """
 
 from __future__ import annotations
 
 import html
 import math
+from datetime import datetime
 from typing import List, Optional, Sequence
 
 # --------------------------------------------------------------------------- #
-#  Palette / design tokens
+#  Design tokens — newspaper palette
 # --------------------------------------------------------------------------- #
-BG          = "#070b16"     # page base (near-black navy)
-PANEL       = "#101728"     # card surface
-PANEL_2     = "#0b1120"     # deeper card surface
-STROKE      = "#20304d"     # borders
-STROKE_SOFT = "#18233a"
-TEXT        = "#eef2fb"     # primary text
-MUTED       = "#8ea0c2"     # secondary text
-FAINT       = "#5d6f92"     # tertiary text
-ACCENT      = "#2df3a0"     # FPL green/teal (primary pop)
-ACCENT_DK   = "#12b57a"
-MAGENTA     = "#ff3d92"     # magenta/purple pop
-PURPLE      = "#8b6dff"
-GOLD        = "#ffd23f"
-UP          = "#2df3a0"
-DOWN        = "#ff5d73"
-FLAT        = "#5d6f92"
+BG        = "#faf8f0"   # aged newsprint
+PAPER     = "#f5f2e8"   # slightly darker panel bg
+INK       = "#1a1a1a"   # primary text
+INK_2     = "#3a3a3a"   # secondary text
+MUTED     = "#6b6b6b"   # tertiary text
+RULE      = "#c8b89a"   # divider lines
+HEADLINE  = "#8b0000"   # dark red headline
+ACCENT    = "#c8960c"   # gold accent (pullquote rules, etc.)
+UP        = "#1a5c1a"   # green for rises
+DOWN      = "#8b0000"   # red for falls / negative
 
-# distinct series colors for the multi-line season race chart
+# Series colours for multi-line chart
 SERIES_COLORS = [
-    "#2df3a0", "#ff3d92", "#8b6dff", "#ffd23f", "#4fc3ff", "#ff9f45",
-    "#42e6c8", "#f76bdc", "#9be15d", "#ff6b6b", "#c084fc", "#38bdf8",
+    "#8b0000", "#1a5c1a", "#1a3a8b", "#7b4f00", "#5a0072",
+    "#005f5f", "#7a1a00", "#004a24", "#003d7a", "#6b3d00",
+    "#4a006b", "#003838", "#5c1a00", "#1a4a00", "#00286b",
 ]
 
-CHIP_SHORT = {
-    "wildcard": "WC", "freehit": "FH", "bboost": "BB", "3xc": "TC",
-    "Wildcard": "WC", "Free Hit": "FH", "Bench Boost": "BB",
-    "Triple Captain": "TC",
-}
-CHIP_EMOJI = {
-    "Wildcard": "🃏", "Free Hit": "🎟️", "Bench Boost": "🚀",
-    "Triple Captain": "©️",
-}
-
 
 # --------------------------------------------------------------------------- #
-#  Small helpers
+#  Helpers
 # --------------------------------------------------------------------------- #
 def esc(x) -> str:
     return html.escape(str(x if x is not None else ""))
@@ -71,7 +56,6 @@ def fnum(x, dp: int = 0) -> str:
 
 
 def compact_rank(x) -> str:
-    """Format an overall (global) rank compactly, e.g. 141975 -> 142k."""
     try:
         n = int(x)
     except (ValueError, TypeError):
@@ -85,20 +69,18 @@ def compact_rank(x) -> str:
     return f"{n:,}"
 
 
-def _pts(points: Sequence[float]) -> List[float]:
-    return [float(p) for p in points]
+def _pts(values) -> List[float]:
+    return [float(p) for p in values]
 
 
-def _poly_points(xs: Sequence[float], ys: Sequence[float]) -> str:
+def _poly(xs, ys) -> str:
     return " ".join(f"{x:.2f},{y:.2f}" for x, y in zip(xs, ys))
 
 
 # --------------------------------------------------------------------------- #
-#  SVG chart builders
+#  SVG charts
 # --------------------------------------------------------------------------- #
-def sparkline(values: Sequence[float], w: int = 240, h: int = 54,
-              color: str = ACCENT, fill: bool = True) -> str:
-    """Area+line sparkline. Marks best (up) and worst (down) points."""
+def sparkline(values, w: int = 200, h: int = 44, color: str = HEADLINE) -> str:
     vals = _pts(values)
     if not vals:
         return f'<svg width="{w}" height="{h}"></svg>'
@@ -106,100 +88,37 @@ def sparkline(values: Sequence[float], w: int = 240, h: int = 54,
         cy = h / 2
         return (
             f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
-            f'<line x1="6" y1="{cy:.1f}" x2="{w-6}" y2="{cy:.1f}" '
-            f'stroke="{STROKE}" stroke-width="1.5" stroke-dasharray="3 4"/>'
-            f'<circle cx="{w/2:.1f}" cy="{cy:.1f}" r="4.5" fill="{color}"/>'
+            f'<line x1="4" y1="{cy:.1f}" x2="{w-4}" y2="{cy:.1f}" '
+            f'stroke="{RULE}" stroke-width="1.5" stroke-dasharray="3 4"/>'
+            f'<circle cx="{w/2:.1f}" cy="{cy:.1f}" r="3.5" fill="{color}"/>'
             f'</svg>'
         )
-    pad = 6
+    pad = 5
     lo, hi = min(vals), max(vals)
     rng = (hi - lo) or 1
     n = len(vals)
     xs = [pad + (w - 2 * pad) * i / (n - 1) for i in range(n)]
     ys = [(h - pad) - (h - 2 * pad) * (v - lo) / rng for v in vals]
-    line = _poly_points(xs, ys)
-    area = f"{xs[0]:.2f},{h-pad:.2f} " + line + f" {xs[-1]:.2f},{h-pad:.2f}"
-    imax = vals.index(hi)
-    imin = vals.index(lo)
-    gid = f"sg{abs(hash((tuple(vals), w, color))) % 100000}"
-    fill_svg = ""
-    if fill:
-        fill_svg = (
-            f'<defs><linearGradient id="{gid}" x1="0" y1="0" x2="0" y2="1">'
-            f'<stop offset="0" stop-color="{color}" stop-opacity="0.34"/>'
-            f'<stop offset="1" stop-color="{color}" stop-opacity="0"/>'
-            f'</linearGradient></defs>'
-            f'<polygon points="{area}" fill="url(#{gid})"/>'
-        )
+    line = _poly(xs, ys)
     return (
-        f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">{fill_svg}'
+        f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
         f'<polyline points="{line}" fill="none" stroke="{color}" '
-        f'stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>'
-        f'<circle cx="{xs[imax]:.2f}" cy="{ys[imax]:.2f}" r="3.6" fill="{color}"/>'
-        f'<circle cx="{xs[imin]:.2f}" cy="{ys[imin]:.2f}" r="3.2" '
-        f'fill="{BG}" stroke="{DOWN}" stroke-width="2"/>'
+        f'stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'
+        f'<circle cx="{xs[-1]:.2f}" cy="{ys[-1]:.2f}" r="3" fill="{color}"/>'
         f'</svg>'
     )
 
 
-def hbar_chart(rows: List[tuple], w: int = 520, bar_h: int = 26, gap: int = 12,
-               color: str = ACCENT, label_w: int = 150,
-               max_val: Optional[float] = None, unit: str = "") -> str:
-    """Horizontal bar chart. rows = [(label, value, highlight_bool), ...]."""
-    if not rows:
-        return ""
-    vals = [r[1] for r in rows]
-    mx = max_val if max_val is not None else (max(vals) or 1)
-    mx = mx or 1
-    n = len(rows)
-    val_w = 54
-    track_w = w - label_w - val_w
-    h = n * bar_h + (n - 1) * gap
-    out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">']
-    for i, (label, val, hi) in enumerate(rows):
-        y = i * (bar_h + gap)
-        bw = max(2.0, track_w * (float(val) / mx))
-        c = GOLD if hi else color
-        out.append(
-            f'<text x="{label_w-12}" y="{y+bar_h*0.5+5:.0f}" text-anchor="end" '
-            f'fill="{TEXT if hi else MUTED}" font-size="15" '
-            f'font-weight="{700 if hi else 500}">{esc(label)}</text>'
-        )
-        out.append(
-            f'<rect x="{label_w}" y="{y}" width="{track_w}" height="{bar_h}" '
-            f'rx="6" fill="{STROKE_SOFT}"/>'
-        )
-        out.append(
-            f'<rect x="{label_w}" y="{y}" width="{bw:.1f}" height="{bar_h}" '
-            f'rx="6" fill="{c}"/>'
-        )
-        vlabel = (f"{val:g}" if isinstance(val, float) else f"{val}") + unit
-        out.append(
-            f'<text x="{label_w+track_w+10}" y="{y+bar_h*0.5+5:.0f}" '
-            f'fill="{TEXT}" font-size="15" font-weight="700" '
-            f'font-family="ui-monospace,Menlo,monospace">{esc(vlabel)}</text>'
-        )
-    out.append("</svg>")
-    return "".join(out)
-
-
-def race_chart(managers: List[dict], w: int = 1120, h: int = 470,
-               mode: str = "rank") -> str:
-    """Multi-line season-race chart.
-
-    mode="rank"  -> mini-league position (1 at top).
-    mode="cum"   -> cumulative points.
-    Labels every series at the right edge, de-collided.
-    """
+def race_chart(managers: List[dict], w: int = 1100, h: int = 360, mode: str = "rank") -> str:
     gws = None
     for m in managers:
-        g = m.get("season", {}).get("gws") or []
+        g = (m.get("season") or {}).get("gws") or []
         if len(g) > (len(gws) if gws else 0):
             gws = g
     if not gws or len(gws) < 2:
         return ""
 
-    pad_l, pad_r, pad_t, pad_b = 46, 176, 22, 34
+    pad_l, pad_r, pad_t, pad_b = 36, 140, 16, 28
     plot_w = w - pad_l - pad_r
     plot_h = h - pad_t - pad_b
     gmin, gmax = min(gws), max(gws)
@@ -216,7 +135,7 @@ def race_chart(managers: List[dict], w: int = 1120, h: int = 470,
             return pad_t + plot_h * (v - vmin) / ((vmax - vmin) or 1)
         y_ticks = sorted({1, max(1, n_mgr // 2), n_mgr})
     else:
-        allc = [c for m in managers for c in (m.get("season", {}).get("cumulative") or [])]
+        allc = [c for m in managers for c in ((m.get("season") or {}).get("cumulative") or [])]
         vmin, vmax = (min(allc), max(allc)) if allc else (0, 1)
 
         def sy(v):
@@ -225,16 +144,17 @@ def race_chart(managers: List[dict], w: int = 1120, h: int = 470,
         y_ticks = list(range(int(vmin), int(vmax) + 1, step))
 
     out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">']
+    # grid lines
     for t in y_ticks:
         yy = sy(t)
         out.append(
             f'<line x1="{pad_l}" y1="{yy:.1f}" x2="{pad_l+plot_w}" y2="{yy:.1f}" '
-            f'stroke="{STROKE_SOFT}" stroke-width="1"/>'
+            f'stroke="{RULE}" stroke-width="0.7" stroke-dasharray="3 4"/>'
         )
         lbl = f"#{t}" if mode == "rank" else fnum(t)
         out.append(
-            f'<text x="{pad_l-10}" y="{yy+4:.1f}" text-anchor="end" '
-            f'fill="{FAINT}" font-size="12">{lbl}</text>'
+            f'<text x="{pad_l-8}" y="{yy+4:.1f}" text-anchor="end" '
+            f'fill="{MUTED}" font-size="11" font-family="Georgia,serif">{lbl}</text>'
         )
     xt_count = min(len(gws), 8)
     xstep = max(1, (len(gws) - 1) // max(1, xt_count - 1))
@@ -242,827 +162,666 @@ def race_chart(managers: List[dict], w: int = 1120, h: int = 470,
         gw = gws[i]
         xx = sx(gw)
         out.append(
-            f'<text x="{xx:.1f}" y="{h-12}" text-anchor="middle" '
-            f'fill="{FAINT}" font-size="12">GW{gw}</text>'
+            f'<text x="{xx:.1f}" y="{h-8}" text-anchor="middle" '
+            f'fill="{MUTED}" font-size="11" font-family="Georgia,serif">GW{gw}</text>'
         )
 
     label_anchors = []
     for idx, m in enumerate(managers):
-        s = m.get("season", {})
+        s = m.get("season") or {}
         mg = s.get("gws") or []
         series = (s.get("league_rank") if mode == "rank" else s.get("cumulative")) or []
         pts = list(zip(mg, series))
         if len(pts) < 2:
             continue
         color = SERIES_COLORS[idx % len(SERIES_COLORS)]
-        is_leader = (m.get("rank") == 1)
-        xs = [sx(g) for g, _ in pts]
-        ys = [sy(v) for _, v in pts]
-        wln = 3.6 if is_leader else 1.9
-        op = 1.0 if is_leader else 0.75
+        is_leader = m.get("rank") == 1
+        xs2 = [sx(g) for g, _ in pts]
+        ys2 = [sy(v) for _, v in pts]
+        wln = 2.8 if is_leader else 1.4
         out.append(
-            f'<polyline points="{_poly_points(xs, ys)}" fill="none" '
-            f'stroke="{color}" stroke-width="{wln}" stroke-opacity="{op}" '
+            f'<polyline points="{_poly(xs2, ys2)}" fill="none" '
+            f'stroke="{color}" stroke-width="{wln}" '
             f'stroke-linejoin="round" stroke-linecap="round"/>'
         )
-        out.append(
-            f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="{4 if is_leader else 3}" '
-            f'fill="{color}"/>'
-        )
-        label_anchors.append((ys[-1], color, m.get("name", ""), is_leader))
+        out.append(f'<circle cx="{xs2[-1]:.1f}" cy="{ys2[-1]:.1f}" r="{3 if is_leader else 2}" fill="{color}"/>')
+        label_anchors.append((ys2[-1], color, m.get("name", ""), is_leader))
 
     label_anchors.sort(key=lambda t: t[0])
-    min_gap = 19
+    min_gap = 16
     placed = []
     for y0, *_ in label_anchors:
         y = y0
         if placed and y < placed[-1] + min_gap:
             y = placed[-1] + min_gap
         placed.append(y)
-    lx = pad_l + plot_w + 12
+    lx = pad_l + plot_w + 8
     for (orig, color, name, is_leader), y in zip(label_anchors, placed):
         short = name.split()[0] if name else ""
         out.append(
-            f'<line x1="{pad_l+plot_w}" y1="{orig:.1f}" x2="{lx-3}" y2="{y:.1f}" '
-            f'stroke="{color}" stroke-width="1" stroke-opacity="0.5"/>'
+            f'<line x1="{pad_l+plot_w}" y1="{orig:.1f}" x2="{lx-2}" y2="{y:.1f}" '
+            f'stroke="{color}" stroke-width="0.8" stroke-opacity="0.6"/>'
         )
-        out.append(f'<circle cx="{lx+2}" cy="{y:.1f}" r="3.4" fill="{color}"/>')
+        out.append(f'<circle cx="{lx+2}" cy="{y:.1f}" r="2.5" fill="{color}"/>')
+        fw = "700" if is_leader else "500"
         out.append(
-            f'<text x="{lx+11}" y="{y+4:.1f}" fill="{TEXT if is_leader else MUTED}" '
-            f'font-size="12.5" font-weight="{700 if is_leader else 500}">'
+            f'<text x="{lx+9}" y="{y+4:.1f}" fill="{INK}" '
+            f'font-size="11" font-weight="{fw}" font-family="Georgia,serif">'
             f'{esc(short)}</text>'
         )
     out.append("</svg>")
     return "".join(out)
 
 
-def split_donut(def_pts, att_pts, size: int = 108) -> str:
-    """Donut splitting defensive vs attacking points."""
-    d = max(0.0, float(def_pts or 0))
-    a = max(0.0, float(att_pts or 0))
-    tot = d + a
-    r = size / 2 - 10
-    cx = cy = size / 2
-    sw = 13
-    circ = 2 * math.pi * r
-    if tot <= 0:
-        return (
-            f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
-            f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" '
-            f'stroke="{STROKE}" stroke-width="{sw}"/>'
-            f'<text x="{cx}" y="{cy+5}" text-anchor="middle" fill="{FAINT}" '
-            f'font-size="13">n/a</text></svg>'
-        )
-    a_len = circ * (a / tot)
-    d_len = circ - a_len
-    return (
-        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
-        f'<g transform="rotate(-90 {cx} {cy})">'
-        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{MAGENTA}" '
-        f'stroke-width="{sw}" stroke-dasharray="{a_len:.2f} {circ:.2f}"/>'
-        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{ACCENT}" '
-        f'stroke-width="{sw}" stroke-dasharray="{d_len:.2f} {circ:.2f}" '
-        f'stroke-dashoffset="{-a_len:.2f}"/>'
-        f'</g>'
-        f'<text x="{cx}" y="{cy-2}" text-anchor="middle" fill="{TEXT}" '
-        f'font-size="20" font-weight="800">{int(tot)}</text>'
-        f'<text x="{cx}" y="{cy+15}" text-anchor="middle" fill="{FAINT}" '
-        f'font-size="10" letter-spacing="1">A/D PTS</text>'
-        f'</svg>'
-    )
-
-
-def movement_badge(mv) -> str:
+# --------------------------------------------------------------------------- #
+#  Section builders
+# --------------------------------------------------------------------------- #
+def render_masthead(meta: dict) -> str:
+    league = esc(meta.get("league_name", "FPL Mini-League"))
+    gw = esc(meta.get("gameweek", ""))
+    generated = meta.get("generated_at", "")
     try:
-        mv = int(mv)
-    except (ValueError, TypeError):
-        mv = 0
-    if mv > 0:
-        return f'<span class="mv up">▲ {mv}</span>'
-    if mv < 0:
-        return f'<span class="mv down">▼ {abs(mv)}</span>'
-    return '<span class="mv flat">–</span>'
-
-
-# --------------------------------------------------------------------------- #
-#  Section renderers
-# --------------------------------------------------------------------------- #
-def render_hero(meta: dict) -> str:
+        dt = datetime.strptime(generated, "%Y-%m-%d %H:%M")
+        date_str = dt.strftime("%A, %d %B %Y").upper()
+    except Exception:
+        date_str = generated.upper()
     is_final = bool(meta.get("is_final"))
-    badge = (
-        '<span class="badge final">✓ FINAL</span>' if is_final
-        else '<span class="badge live"><span class="dot"></span>LIVE</span>'
-    )
-    season = meta.get("season_label") or ""
-    season_html = f' · {esc(season)}' if season else ""
+    status = "FINAL" if is_final else "LIVE UPDATE"
+    managers = meta.get("num_managers", "")
+    gw_avg = fnum(meta.get("gw_average"), 1)
+    season = esc(meta.get("season_label") or "2025/26")
     return f"""
-    <header class="hero">
-      <div class="hero-top">
-        <div class="hero-kicker">FANTASY PREMIER LEAGUE · MINI-LEAGUE REPORT</div>
-        {badge}
-      </div>
-      <h1 class="hero-title">{esc(meta.get('league_name',''))}</h1>
-      <div class="hero-sub">Gameweek {esc(meta.get('gameweek',''))}{season_html}</div>
-      <div class="hero-stats">
-        <div class="hstat"><div class="hstat-v">{esc(meta.get('gameweek',''))}</div>
-          <div class="hstat-l">Gameweek</div></div>
-        <div class="hstat"><div class="hstat-v">{esc(meta.get('num_managers',''))}</div>
-          <div class="hstat-l">Managers</div></div>
-        <div class="hstat"><div class="hstat-v accent">{fnum(meta.get('gw_average'),1)}</div>
-          <div class="hstat-l">GW Average</div></div>
-        <div class="hstat"><div class="hstat-v small">{esc(meta.get('generated_at',''))}</div>
-          <div class="hstat-l">Generated</div></div>
-      </div>
-    </header>"""
+<header class="masthead">
+  <div class="masthead-rule top-rule"></div>
+  <div class="masthead-inner">
+    <div class="masthead-meta-left">
+      <div class="mast-kicker">FANTASY PREMIER LEAGUE · MINI-LEAGUE REPORT</div>
+      <div class="mast-season">SEASON {season}</div>
+    </div>
+    <div class="masthead-title">
+      <div class="mast-name">{league}</div>
+      <div class="mast-sub">THE GAZETTE</div>
+    </div>
+    <div class="masthead-meta-right">
+      <div class="mast-date">{date_str}</div>
+      <div class="mast-gw">GAMEWEEK {gw} &nbsp;·&nbsp; {status}</div>
+      <div class="mast-stats">{managers} managers · avg {gw_avg} pts</div>
+    </div>
+  </div>
+  <div class="masthead-rule"></div>
+  <div class="masthead-rule thin-rule"></div>
+</header>"""
 
 
-def render_league_table(managers: List[dict]) -> str:
+def render_banner(managers: List[dict], narrative: str) -> str:
+    """Big headline from narrative first line + winner callout."""
     if not managers:
         return ""
-    gwmax = max((abs(m.get("gw_points", 0)) for m in managers), default=1) or 1
-    totmin = min((m.get("total_points", 0) for m in managers), default=0)
-    totmax = max((m.get("total_points", 0) for m in managers), default=1)
-    totrng = (totmax - totmin) or 1
+    leader = managers[0]
+    first_line = ""
+    if narrative:
+        first_line = narrative.strip().split("\n")[0].strip()
+        # strip leading 'GW#: ' prefix
+        if first_line and ":" in first_line[:8]:
+            first_line = first_line.split(":", 1)[1].strip()
+    if not first_line:
+        first_line = f"{esc(leader.get('name',''))} leads the pack"
+    return f"""
+<div class="banner">
+  <div class="banner-rule"></div>
+  <h1 class="banner-headline">{esc(first_line)}</h1>
+  <div class="banner-deck">
+    GW{esc(leader.get('season',{}).get('gws',['?'])[-1] if leader.get('season',{}).get('gws') else '?')}
+    LEADER: <strong>{esc(leader.get('name',''))}</strong>
+    · {fnum(leader.get('total_points'))} pts total
+    · {fnum(leader.get('gw_points'))} this week
+  </div>
+  <div class="banner-rule"></div>
+</div>"""
+
+
+def render_three_col(managers: List[dict], league: dict, narrative: str,
+                     player_photos: dict = None) -> str:
+    """Three-column layout: league table | captain picks | match report."""
+    return f"""
+<div class="three-col">
+  <div class="col-left">
+    {_league_table(managers)}
+  </div>
+  <div class="col-mid">
+    {_captain_column(managers, player_photos or {})}
+  </div>
+  <div class="col-right">
+    {_match_report(narrative)}
+  </div>
+</div>"""
+
+
+def _league_table(managers: List[dict]) -> str:
     rows = []
     for m in managers:
         rank = m.get("rank", 0)
         leader = rank == 1
-        gw = m.get("gw_points", 0)
-        hit = m.get("gw_hit", 0)
-        chip = m.get("chip")
-        chip_html = ""
-        if chip:
-            em = CHIP_EMOJI.get(chip, "🎯")
-            chip_html = f'<span class="tag chip">{em} {esc(chip)}</span>'
-        hit_html = f'<span class="tag hit">-{esc(hit)}</span>' if hit else ""
-        gw_w = 100 * abs(gw) / gwmax
-        tot_frac = (m.get("total_points", 0) - totmin) / totrng
+        mv = (m.get("last_rank") or m.get("prev_rank") or rank) - rank
+        if mv > 0:
+            mv_html = f'<span class="mv-up">▲</span>'
+        elif mv < 0:
+            mv_html = f'<span class="mv-dn">▼</span>'
+        else:
+            mv_html = '<span class="mv-flat">—</span>'
         medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "")
-        rankcell = (f'<span class="rk-num">{esc(rank)}</span>'
-                    f'<span class="rk-medal">{medal}</span>')
+        chip = m.get("chip")
+        chip_tag = f'<span class="lt-chip">{esc(chip[:2].upper())}</span>' if chip else ""
+        hit = m.get("gw_hit", 0)
+        hit_tag = f'<span class="lt-hit">-{hit}</span>' if hit else ""
         rows.append(f"""
-        <div class="lt-row{' leader' if leader else ''}">
-          <div class="lt-rank">{rankcell}</div>
-          <div class="lt-mv">{movement_badge(m.get('rank_movement'))}</div>
-          <div class="lt-name">
-            <div class="nm">{esc(m.get('name',''))} {chip_html}{hit_html}</div>
-            <div class="tm">{esc(m.get('team_name',''))}</div>
-          </div>
-          <div class="lt-total">
-            <div class="tot-v">{fnum(m.get('total_points'))}</div>
-            <div class="tot-bar"><span style="width:{tot_frac*100:.1f}%"></span></div>
-          </div>
-          <div class="lt-gw">
-            <div class="gw-v">{esc(gw)}</div>
-            <div class="gw-bar"><span style="width:{gw_w:.1f}%"></span></div>
-          </div>
-          <div class="lt-or">{compact_rank(m.get('overall_rank'))}</div>
-        </div>""")
+    <tr class="{'lt-leader' if leader else ''}">
+      <td class="lt-rk">{medal or rank}</td>
+      <td class="lt-mv">{mv_html}</td>
+      <td class="lt-nm">{esc(m.get('name',''))} {chip_tag}{hit_tag}</td>
+      <td class="lt-tot">{fnum(m.get('total_points'))}</td>
+      <td class="lt-gw">{fnum(m.get('gw_points'))}</td>
+    </tr>""")
     return f"""
-    <section class="card">
-      <div class="sec-head"><span class="sec-ico">🏆</span>
-        <h2>League Table</h2>
-        <span class="sec-note">total points · this GW · global rank</span></div>
-      <div class="lt-head">
-        <div>#</div><div>+/-</div><div>Manager</div>
-        <div>Total</div><div>GW</div><div>Global</div>
+<div class="col-head">LEAGUE TABLE</div>
+<table class="lt">
+  <thead><tr>
+    <th>#</th><th></th><th>Manager</th><th>Total</th><th>GW</th>
+  </tr></thead>
+  <tbody>{''.join(rows)}</tbody>
+</table>"""
+
+
+def _captain_column(managers: List[dict], player_photos: dict) -> str:
+    rows = []
+    for m in managers[:8]:
+        cap = m.get("captain") or "—"
+        cap_pts = m.get("captain_points")
+        pts_str = f"{cap_pts}" if cap_pts is not None else "?"
+        chip = m.get("chip")
+        chip_tag = f' <span class="lt-chip">{esc(chip[:2].upper() if chip else "")}</span>' if chip else ""
+        rows.append(f"""
+    <div class="cap-row">
+      <div class="cap-info">
+        <div class="cap-mgr">{esc(m.get('name',''))}{chip_tag}</div>
+        <div class="cap-player">© {esc(cap)}</div>
       </div>
-      <div class="lt">{''.join(rows)}</div>
-    </section>"""
+      <div class="cap-pts {'cap-good' if (cap_pts or 0) >= 10 else 'cap-meh'}">{pts_str}pts</div>
+    </div>""")
+    return f"""
+<div class="col-head">CAPTAIN PICKS</div>
+<div class="cap-list">{''.join(rows)}</div>"""
 
 
-def render_race(managers: List[dict]) -> str:
+def _match_report(narrative: str) -> str:
+    if not narrative or not narrative.strip():
+        return '<div class="col-head">MATCH REPORT</div><p class="no-narrative">No report available.</p>'
+    paras = [p.strip() for p in narrative.split("\n") if p.strip()]
+    # skip first line — used as banner headline
+    body_paras = paras[1:] if len(paras) > 1 else paras
+    parts = []
+    for i, p in enumerate(body_paras):
+        if i == 0:
+            # drop-cap on first real paragraph
+            first_char = esc(p[0]) if p else ""
+            rest = esc(p[1:]) if len(p) > 1 else ""
+            parts.append(f'<p class="report-para dropcap"><span class="drop">{first_char}</span>{rest}</p>')
+        else:
+            parts.append(f'<p class="report-para">{esc(p)}</p>')
+    return f"""
+<div class="col-head">MATCH REPORT</div>
+{''.join(parts)}"""
+
+
+def render_stats_strip(managers: List[dict], league: dict) -> str:
+    """Four stat boxes: GW winner | Biggest riser | Bench pain | Captain of the week."""
+    gw_top = sorted(managers, key=lambda m: m.get("gw_points", 0) or 0, reverse=True)
+    gw_winner = gw_top[0] if gw_top else {}
+    riser = league.get("biggest_riser")
+    bench_lb = (league.get("bench_leaderboard") or [])
+    bench_top = bench_lb[0] if bench_lb else {}
+    # captain of the week: manager with highest captain points
+    cap_best = max(managers, key=lambda m: m.get("captain_points", 0) or 0, default={})
+
+    def stat_box(emoji, kicker, name, stat, sub):
+        return f"""
+    <div class="stat-box">
+      <div class="stat-emoji">{emoji}</div>
+      <div class="stat-kicker">{esc(kicker)}</div>
+      <div class="stat-name">{esc(name)}</div>
+      <div class="stat-value">{esc(stat)}</div>
+      <div class="stat-sub">{esc(sub)}</div>
+    </div>"""
+
+    gw_pts = fnum(gw_winner.get("gw_points"))
+    riser_html = stat_box(
+        "📈", "BIGGEST RISER",
+        (riser or {}).get("name", "—"),
+        f'+{(riser or {}).get("change", 0)} place(s)',
+        "moved up this week"
+    ) if riser else stat_box("📈", "BIGGEST RISER", "—", "—", "no movement")
+
+    return f"""
+<div class="stats-strip">
+  {stat_box("⚡", "GW TOP SCORER", gw_winner.get('name',''), f'{gw_pts} pts', f'© {esc(gw_winner.get("captain",""))}')}
+  {riser_html}
+  {stat_box("🪑", "BENCH PAIN KING", bench_top.get('name','—'), f'{fnum(bench_top.get("season_bench","—"))} pts', 'season bench points')}
+  {stat_box("🎯", "BEST CAPTAIN", cap_best.get('name','—'), f'{fnum(cap_best.get("captain_points","—"))} pts', f'© {esc(cap_best.get("captain",""))}')}
+</div>"""
+
+
+def render_race_section(managers: List[dict]) -> str:
     svg = race_chart(managers, mode="rank")
     if not svg:
         return ""
     return f"""
-    <section class="card">
-      <div class="sec-head"><span class="sec-ico">📈</span>
-        <h2>The Season Race</h2>
-        <span class="sec-note">mini-league position after each gameweek · top = 1st</span></div>
-      <div class="chart-wrap">{svg}</div>
-    </section>"""
+<section class="np-section">
+  <div class="np-section-head">
+    <span class="np-head-rule"></span>
+    <span class="np-head-title">THE SEASON RACE</span>
+    <span class="np-head-rule"></span>
+  </div>
+  <div class="chart-box">{svg}</div>
+  <div class="chart-caption">Mini-league position after each gameweek · 1st place at top</div>
+</section>"""
 
 
-def render_weekly_wins(league: dict) -> str:
-    ww = league.get("weekly_wins") or []
-    ww = [w for w in ww if (w.get("wins") or 0) > 0]
-    if not ww:
-        return ""
-    ww = sorted(ww, key=lambda w: w.get("wins", 0), reverse=True)
-    rows = [(w.get("name", "").split()[0], w.get("wins", 0), i == 0)
-            for i, w in enumerate(ww)]
-    chart = hbar_chart(rows, w=540, color=PURPLE, label_w=110)
-    return f"""
-    <section class="card half">
-      <div class="sec-head"><span class="sec-ico">👑</span>
-        <h2>Weekly Wins</h2>
-        <span class="sec-note">GW top-score crowns</span></div>
-      <div class="chart-wrap tight">{chart}</div>
-    </section>"""
-
-
-def render_gw_standings(league: dict) -> str:
-    gs = league.get("gw_standings") or []
-    if not gs:
-        return ""
-    rows = [(g.get("name", "").split()[0], g.get("gw_points", 0), i == 0)
-            for i, g in enumerate(gs)]
-    chart = hbar_chart(rows, w=540, color=ACCENT, label_w=110)
-    return f"""
-    <section class="card half">
-      <div class="sec-head"><span class="sec-ico">⚡</span>
-        <h2>This Gameweek</h2>
-        <span class="sec-note">net points scored</span></div>
-      <div class="chart-wrap tight">{chart}</div>
-    </section>"""
-
-
-def render_highlights(highlights: dict) -> str:
-    if not highlights:
-        return ""
+def render_manager_cards(managers: List[dict]) -> str:
     cards = []
-
-    def card(emoji, kicker, name, big, sub, accent):
-        return f"""
-        <div class="hl-card" style="--hlc:{accent}">
-          <div class="hl-emoji">{emoji}</div>
-          <div class="hl-kick">{esc(kicker)}</div>
-          <div class="hl-name">{esc(name)}</div>
-          <div class="hl-big">{big}</div>
-          <div class="hl-sub">{esc(sub)}</div>
-        </div>"""
-
-    h = highlights
-    if h.get("comeback"):
-        c = h["comeback"]
-        cards.append(card("📈", "Comeback King", c.get("manager", ""),
-                          f'#{esc(c.get("prev_rank","?"))} → #{esc(c.get("current_rank","?"))}',
-                          f'climbed {abs(c.get("change",0))} place(s)', ACCENT))
-    if h.get("choke"):
-        c = h["choke"]
-        cards.append(card("📉", "Biggest Choke", c.get("manager", ""),
-                          f'#{esc(c.get("prev_rank","?"))} → #{esc(c.get("current_rank","?"))}',
-                          f'dropped {abs(c.get("change",0))} place(s)', DOWN))
-    if h.get("captain_fail"):
-        c = h["captain_fail"]
-        cards.append(card("🤡", "Captain Flop", c.get("manager", ""),
-                          esc(c.get("captain", "")),
-                          f'armband returned just {c.get("points",0)} pts', GOLD))
-    if h.get("differential_hero"):
-        c = h["differential_hero"]
-        own = c.get("ownership_pct")
-        owns = f'{own:g}% owned' if own is not None else "low-owned punt"
-        cards.append(card("💎", "Differential Gem", c.get("manager", ""),
-                          esc(c.get("player", "")),
-                          f'{c.get("points",0)} pts · {owns}', PURPLE))
-    if h.get("bench_hero"):
-        c = h["bench_hero"]
-        cards.append(card("🪑", "Bench Heartbreak", c.get("manager", ""),
-                          esc(c.get("player", "")),
-                          f'{c.get("points",0)} pts left on the bench', MAGENTA))
-    if not cards:
-        return ""
-    return f"""
-    <section class="card">
-      <div class="sec-head"><span class="sec-ico">🎬</span>
-        <h2>Gameweek Highlights</h2>
-        <span class="sec-note">the heroes, villains &amp; heartbreak</span></div>
-      <div class="hl-grid n{len(cards)}">{''.join(cards)}</div>
-    </section>"""
-
-
-def _form_badge(form: dict) -> str:
-    state = (form or {}).get("state", "steady")
-    diff = (form or {}).get("diff", 0)
-    conf = {
-        "hot":    ("🔥", "HOT", "hot"),
-        "cold":   ("🥶", "COLD", "cold"),
-        "steady": ("➖", "STEADY", "steady"),
-    }.get(state, ("➖", "STEADY", "steady"))
-    sign = "+" if (diff or 0) >= 0 else ""
-    return (f'<span class="form-badge {conf[2]}">{conf[0]} {conf[1]} '
-            f'<b>{sign}{fnum(diff,1)}</b></span>')
-
-
-def render_manager_card(m: dict, idx: int) -> str:
-    s = m.get("season", {}) or {}
-    color = SERIES_COLORS[idx % len(SERIES_COLORS)]
-    spark = sparkline(s.get("net_points") or [], w=250, h=56, color=color)
-    donut = split_donut(m.get("defensive_points"), m.get("attacking_points"))
-    best = s.get("best_gw") or {}
-    worst = s.get("worst_gw") or {}
-    rank = m.get("rank", 0)
-
-    cap = m.get("captain", "")
-    capp = m.get("captain_points", 0)
-    cap_cls = "bad" if (capp is not None and capp <= 2) else "good"
-
-    chip = m.get("chip")
-    chip_pill = (f'<span class="mc-chip">{CHIP_EMOJI.get(chip,"🎯")} {esc(chip)}</span>'
-                 if chip else "")
-    hit = m.get("gw_hit", 0)
-    hit_pill = f'<span class="mc-hit">-{esc(hit)} hit</span>' if hit else ""
-
-    chips_used = s.get("chips_used") or []
-    chip_dots = ""
-    if chips_used:
-        items = "".join(
-            f'<span class="cu">{CHIP_SHORT.get(c.get("chip"), "?")}'
-            f'<i>GW{esc(c.get("gw",""))}</i></span>'
-            for c in chips_used
-        )
-        chip_dots = (f'<div class="mc-chips"><span class="cu-lbl">CHIPS</span>'
-                     f'{items}</div>')
-
-    ts_played = m.get("top_scorer_played")
-    ts_mark = "" if ts_played else " (DNP)"
-
-    return f"""
-    <div class="mc" style="--mc:{color}">
+    for idx, m in enumerate(managers):
+        color = SERIES_COLORS[idx % len(SERIES_COLORS)]
+        s = m.get("season") or {}
+        spark = sparkline(s.get("net_points") or [], w=180, h=40, color=color)
+        rank = m.get("rank", 0)
+        gw_pts = m.get("gw_points", 0)
+        cap = m.get("captain") or "—"
+        cap_pts = m.get("captain_points", 0) or 0
+        cap_cls = "cap-good" if cap_pts >= 10 else ("cap-meh" if cap_pts >= 6 else "cap-bad")
+        chip = m.get("chip")
+        chip_html = f'<span class="mc-chip">{esc(chip)}</span>' if chip else ""
+        hit = m.get("gw_hit", 0)
+        hit_html = f'<span class="mc-hit">-{hit}pt</span>' if hit else ""
+        bench = m.get("bench_points") or 0
+        or_rank = compact_rank(m.get("overall_rank"))
+        cards.append(f"""
+    <div class="mc" style="border-top-color:{color}">
       <div class="mc-top">
-        <div class="mc-rank">{esc(rank)}</div>
+        <div class="mc-rank" style="color:{color}">{rank}</div>
         <div class="mc-id">
           <div class="mc-name">{esc(m.get('name',''))}</div>
           <div class="mc-team">{esc(m.get('team_name',''))}</div>
         </div>
-        <div class="mc-gw">
-          <div class="mc-gw-v">{esc(m.get('gw_points',0))}</div>
-          <div class="mc-gw-l">GW PTS</div>
-        </div>
+        <div class="mc-gwv" style="color:{color}">{fnum(gw_pts)}</div>
       </div>
-      <div class="mc-tags">
-        {_form_badge(m.get('form'))}
-        <span class="mc-meta">📐 {esc(m.get('formation',''))}</span>
-        {chip_pill}{hit_pill}
+      <div class="mc-tags">{chip_html}{hit_html}</div>
+      <div class="mc-spark">{spark}</div>
+      <div class="mc-stats">
+        <div class="mcs"><span class="mcs-k">Captain</span><span class="mcs-v {cap_cls}">© {esc(cap)} · {cap_pts}pts</span></div>
+        <div class="mcs"><span class="mcs-k">Bench</span><span class="mcs-v">{fnum(bench)} pts</span></div>
+        <div class="mcs"><span class="mcs-k">Total</span><span class="mcs-v">{fnum(m.get('total_points'))} pts</span></div>
+        <div class="mcs"><span class="mcs-k">Global</span><span class="mcs-v">{or_rank}</span></div>
       </div>
-      <div class="mc-mid">
-        <div class="mc-spark">
-          <div class="mc-spark-hd">SEASON FORM · net pts / GW</div>
-          {spark}
-          <div class="mc-bw">
-            <span class="bw-good">▲ Best GW{esc(best.get('gw','—'))} · {esc(best.get('points','—'))}</span>
-            <span class="bw-bad">▼ Worst GW{esc(worst.get('gw','—'))} · {esc(worst.get('points','—'))}</span>
-          </div>
-        </div>
-        <div class="mc-donut">
-          {donut}
-          <div class="mc-donut-key">
-            <span><i style="background:{MAGENTA}"></i>Att {esc(m.get('attacking_points',0))}</span>
-            <span><i style="background:{ACCENT}"></i>Def {esc(m.get('defensive_points',0))}</span>
-          </div>
-        </div>
-      </div>
-      <div class="mc-grid">
-        <div class="kv"><span class="k">© Captain</span>
-          <span class="v cap-{cap_cls}">{esc(cap)} · {esc(capp)}</span></div>
-        <div class="kv"><span class="k">⭐ Top Scorer</span>
-          <span class="v">{esc(m.get('top_scorer',''))} · {esc(m.get('top_scorer_points',0))}{ts_mark}</span></div>
-        <div class="kv"><span class="k">🪑 Bench</span>
-          <span class="v">{esc(m.get('bench_points',0))} pts</span></div>
-        <div class="kv"><span class="k">🌍 Global Rank</span>
-          <span class="v">{compact_rank(m.get('overall_rank'))}</span></div>
-        <div class="kv"><span class="k">💰 Team Value</span>
-          <span class="v">£{fnum(m.get('team_value'),1)}m</span></div>
-        <div class="kv"><span class="k">🏦 In Bank</span>
-          <span class="v">£{fnum(m.get('bank'),1)}m</span></div>
-        <div class="kv"><span class="k">🔁 Transfers</span>
-          <span class="v">{esc(s.get('transfers_total',0))} · {esc(s.get('hits_total',0))}pt hits</span></div>
-        <div class="kv"><span class="k">📊 Season Avg</span>
-          <span class="v">{fnum(s.get('avg'),1)} pts</span></div>
-      </div>
-      {chip_dots}
+    </div>""")
+    return f"""
+<section class="np-section">
+  <div class="np-section-head">
+    <span class="np-head-rule"></span>
+    <span class="np-head-title">MANAGER DOSSIERS</span>
+    <span class="np-head-rule"></span>
+  </div>
+  <div class="mc-grid">{''.join(cards)}</div>
+</section>"""
+
+
+def render_intel(league: dict) -> str:
+    power = (league.get("power_rankings") or [])[:8]
+    cap_trends = (league.get("captaincy_trends") or [])[:5]
+    rivalries = (league.get("rivalries") or [])[:5]
+
+    # Power rankings
+    pw_rows = ""
+    for p in power:
+        delta = p.get("delta", 0)
+        if delta >= 2:
+            arrow = f'<span class="mv-up">▲{delta}</span>'
+        elif delta <= -2:
+            arrow = f'<span class="mv-dn">▼{abs(delta)}</span>'
+        else:
+            arrow = '<span class="mv-flat">—</span>'
+        pw_rows += f"""
+    <div class="intel-row">
+      <span class="intel-rank">#{esc(p['power_rank'])}</span>
+      <span class="intel-name">{esc(p['name'])}</span>
+      <span class="intel-val">{esc(p['score'])}</span>
+      {arrow}
     </div>"""
 
-
-def render_manager_cards(managers: List[dict]) -> str:
-    if not managers:
-        return ""
-    cards = "".join(render_manager_card(m, i) for i, m in enumerate(managers))
-    return f"""
-    <section class="card">
-      <div class="sec-head"><span class="sec-ico">🧾</span>
-        <h2>Manager Dossiers</h2>
-        <span class="sec-note">the season so far, manager by manager</span></div>
-      <div class="mc-grid-wrap">{cards}</div>
-    </section>"""
-
-
-def render_captaincy_trends(league: dict) -> str:
-    """Who captained what across the league + power rankings + bench leaderboard."""
-    trends = league.get("captaincy_trends") or []
-    power = league.get("power_rankings") or []
-    bench = league.get("bench_leaderboard") or []
-    rivalries = (league.get("rivalries") or [])[:6]
-
-    if not (trends or power or bench):
-        return ""
-
-    # Captain donut bars
-    cap_html = ""
-    if trends:
-        max_cnt = trends[0]["count"] if trends else 1
-        rows = []
-        for t in trends[:5]:
-            pct = t["count"] / max_cnt * 100
-            pts_txt = f'{t["gw_pts"]}pts' if t["gw_pts"] else "—"
-            owned_txt = f'{t["pct"]}% of mgrs'
-            rows.append(f"""
-            <div class="ct-row">
-              <div class="ct-name">{esc(t['player'])}</div>
-              <div class="ct-bar-wrap">
-                <div class="ct-bar" style="width:{pct:.0f}%"></div>
-              </div>
-              <div class="ct-meta">{esc(owned_txt)} · {esc(pts_txt)}</div>
-            </div>""")
-        cap_html = f"""
-        <div class="extra-panel">
-          <div class="ep-head">⚽ Captaincy Trends</div>
-          {''.join(rows)}
-        </div>"""
-
-    # Power rankings table
-    pw_html = ""
-    if power:
-        rows = []
-        for p in power[:8]:
-            delta = p.get("delta", 0)
-            if delta >= 2:
-                arrow = f'<span class="pr-up">▲{delta}</span>'
-            elif delta <= -2:
-                arrow = f'<span class="pr-dn">▼{abs(delta)}</span>'
-            else:
-                arrow = '<span class="pr-flat">—</span>'
-            rows.append(f"""
-            <div class="pr-row">
-              <span class="pr-rank">#{esc(p['power_rank'])}</span>
-              <span class="pr-name">{esc(p['name'])}</span>
-              <span class="pr-score">{esc(p['score'])}</span>
-              {arrow}
-            </div>""")
-        pw_html = f"""
-        <div class="extra-panel">
-          <div class="ep-head">📊 Power Rankings <span class="ep-note">form-weighted avg</span></div>
-          {''.join(rows)}
-        </div>"""
-
-    # Bench leaderboard
-    bn_html = ""
-    if bench:
-        rows = []
-        for b in bench[:6]:
-            gw_note = f'+{b["gw_bench"]}' if b["gw_bench"] else "—"
-            rows.append(f"""
-            <div class="pr-row">
-              <span class="pr-name">{esc(b['name'])}</span>
-              <span class="pr-score">{esc(b['season_bench'])}pts</span>
-              <span class="pr-flat">GW: {esc(gw_note)}</span>
-            </div>""")
-        bn_html = f"""
-        <div class="extra-panel">
-          <div class="ep-head">🪑 Bench Pain <span class="ep-note">season total</span></div>
-          {''.join(rows)}
-        </div>"""
+    # Captaincy trends
+    cap_rows = ""
+    max_cnt = cap_trends[0]["count"] if cap_trends else 1
+    for t in cap_trends:
+        pct = t["count"] / max_cnt * 100
+        pts = f'{t["gw_pts"]}pts' if t.get("gw_pts") else "—"
+        cap_rows += f"""
+    <div class="ct-row">
+      <div class="ct-name">{esc(t['player'])}</div>
+      <div class="ct-bar-wrap"><div class="ct-bar" style="width:{pct:.0f}%"></div></div>
+      <div class="ct-meta">{esc(t['pct'])}% · {esc(pts)}</div>
+    </div>"""
 
     # Rivalries
-    rv_html = ""
-    if rivalries:
-        items = "".join(
-            f'<div class="rv-item">'
-            f'<span class="rv-a">{esc(r["leader"])}</span>'
-            f'<span class="rv-gap">+{esc(r["gap"])}pts</span>'
-            f'<span class="rv-b">{esc(r["chaser"])}</span>'
-            f'</div>'
-            for r in rivalries[:5]
-        )
-        rv_html = f"""
-        <div class="extra-panel extra-panel-wide">
-          <div class="ep-head">⚔️ Rivalries <span class="ep-note">current overall gaps</span></div>
-          <div class="rv-grid">{items}</div>
-        </div>"""
+    rv_rows = ""
+    for r in rivalries:
+        rv_rows += f"""
+    <div class="rv-row">
+      <span class="rv-a">{esc(r['leader'])}</span>
+      <span class="rv-gap">+{esc(r['gap'])}pts ahead</span>
+      <span class="rv-b">{esc(r['chaser'])}</span>
+    </div>"""
 
-    inner = "".join(filter(None, [cap_html, pw_html, bn_html, rv_html]))
     return f"""
-    <section class="card">
-      <div class="sec-head"><span class="sec-ico">📈</span>
-        <h2>League Intel</h2>
-        <span class="sec-note">captaincy · power rankings · bench pain · rivalries</span>
-      </div>
-      <div class="extra-grid">{inner}</div>
-    </section>"""
-
-
-def render_narrative(narrative: str) -> str:
-    if not narrative or not narrative.strip():
-        return ""
-    paras = [p.strip() for p in narrative.split("\n") if p.strip()]
-    body = "".join(f"<p>{esc(p)}</p>" for p in paras)
-    return f"""
-    <section class="card pundit">
-      <div class="sec-head"><span class="sec-ico">🎙️</span>
-        <h2>The Pundit's Take</h2>
-        <span class="sec-note">AI-written recap</span></div>
-      <div class="pundit-body">
-        <span class="quote-mark">“</span>
-        {body}
-      </div>
-    </section>"""
+<section class="np-section">
+  <div class="np-section-head">
+    <span class="np-head-rule"></span>
+    <span class="np-head-title">LEAGUE INTEL</span>
+    <span class="np-head-rule"></span>
+  </div>
+  <div class="intel-grid">
+    <div class="intel-panel">
+      <div class="intel-panel-head">POWER RANKINGS <span class="intel-note">form-weighted</span></div>
+      {pw_rows}
+    </div>
+    <div class="intel-panel">
+      <div class="intel-panel-head">CAPTAINCY TRENDS</div>
+      {cap_rows}
+    </div>
+    <div class="intel-panel">
+      <div class="intel-panel-head">CLOSEST RIVALRIES</div>
+      {rv_rows}
+    </div>
+  </div>
+</section>"""
 
 
 def render_footer(meta: dict) -> str:
-    season = meta.get("season_label")
+    season = meta.get("season_label") or ""
     seg = f" · {esc(season)}" if season else ""
+    gw = meta.get("gameweek", "")
+    league = esc(meta.get("league_name", ""))
+    generated = meta.get("generated_at", "")
     return f"""
-    <footer class="footer">
-      <div>{esc(meta.get('league_name',''))} · Gameweek {esc(meta.get('gameweek',''))}{seg}</div>
-      <div class="foot-mono">Generated {esc(meta.get('generated_at',''))} · FPL Spy automated report</div>
-    </footer>"""
+<footer class="np-footer">
+  <div class="footer-rule"></div>
+  <div class="footer-inner">
+    <span>{league} · Gameweek {esc(str(gw))}{seg}</span>
+    <span class="footer-right">Generated {esc(generated)} · FPL Spy automated report</span>
+  </div>
+</footer>"""
 
 
 # --------------------------------------------------------------------------- #
-#  Master
+#  Master entry point
 # --------------------------------------------------------------------------- #
 def render_report_html(payload: dict) -> str:
-    meta = payload.get("meta", {}) or {}
-    managers = payload.get("managers", []) or []
-    league = payload.get("league", {}) or {}
-    highlights = payload.get("highlights", {}) or {}
-    narrative = payload.get("narrative", "") or ""
-
-    twin = (
-        f'<div class="row2">{render_gw_standings(league)}'
-        f'{render_weekly_wins(league)}</div>'
-    )
+    meta = payload.get("meta") or {}
+    managers = payload.get("managers") or []
+    league = payload.get("league") or {}
+    narrative = payload.get("narrative") or ""
+    player_photos = payload.get("player_photos") or {}
 
     body = "".join([
-        render_hero(meta),
-        render_league_table(managers),
-        render_race(managers),
-        twin,
-        render_highlights(highlights),
-        render_captaincy_trends(league),
+        render_masthead(meta),
+        render_banner(managers, narrative),
+        render_three_col(managers, league, narrative, player_photos),
+        render_stats_strip(managers, league),
+        render_race_section(managers),
         render_manager_cards(managers),
-        render_narrative(narrative),
+        render_intel(league),
         render_footer(meta),
     ])
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<style>
-{CSS}
-</style></head>
+<title>FPL Report – GW{meta.get('gameweek','')}</title>
+<style>{CSS}</style>
+</head>
 <body>
-<div class="page">
-{body}
-</div>
+<div class="page">{body}</div>
 </body></html>"""
 
 
 # --------------------------------------------------------------------------- #
-#  CSS
+#  CSS — newspaper style
 # --------------------------------------------------------------------------- #
 CSS = f"""
-* {{ box-sizing: border-box; }}
-html, body {{ margin: 0; padding: 0; background: {BG}; }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+html, body {{ background: {BG}; color: {INK}; }}
 body {{
-  width: 1200px; margin: 0; background:
-    radial-gradient(1200px 620px at 12% -8%, rgba(45,243,160,0.10), transparent 60%),
-    radial-gradient(1100px 640px at 96% 4%, rgba(255,61,146,0.10), transparent 58%),
-    {BG};
-  color: {TEXT};
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  width: 1200px; margin: 0 auto;
+  font-family: Georgia, "Times New Roman", Times, serif;
+  font-size: 15px; line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  font-variant-numeric: tabular-nums;
 }}
-.page {{ width: 1200px; padding: 40px 40px 30px; }}
+.page {{ width: 1200px; padding: 28px 40px 40px; }}
 
-/* ------- Hero ------- */
-.hero {{
-  position: relative; padding: 34px 38px 30px; margin-bottom: 26px;
-  border-radius: 22px; overflow: hidden;
-  background:
-    linear-gradient(135deg, rgba(45,243,160,0.14), rgba(139,109,255,0.10) 55%, rgba(255,61,146,0.14)),
-    {PANEL};
-  border: 1px solid {STROKE};
-  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+/* ---- Masthead ---- */
+.masthead {{ margin-bottom: 18px; }}
+.masthead-rule {{ height: 4px; background: {INK}; margin: 4px 0; }}
+.top-rule {{ height: 8px; }}
+.thin-rule {{ height: 1px; margin-top: 2px; }}
+.masthead-inner {{
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0;
 }}
-.hero-top {{ display:flex; justify-content:space-between; align-items:center; }}
-.hero-kicker {{ color:{ACCENT}; font-weight:800; letter-spacing:2.5px; font-size:13px; }}
-.hero-title {{ font-size:56px; line-height:1.02; margin:16px 0 6px; font-weight:900;
-  letter-spacing:-1px;
-  background: linear-gradient(90deg, #ffffff, #cfe9ff 60%, {ACCENT});
-  -webkit-background-clip:text; background-clip:text; color:transparent; }}
-.hero-sub {{ color:{MUTED}; font-size:20px; font-weight:600; }}
-.hero-stats {{ display:flex; gap:14px; margin-top:26px; }}
-.hstat {{ flex:1; background: rgba(7,11,22,0.55); border:1px solid {STROKE};
-  border-radius:14px; padding:14px 16px; }}
-.hstat-v {{ font-size:30px; font-weight:900; letter-spacing:-0.5px; }}
-.hstat-v.small {{ font-size:18px; font-weight:800; }}
-.hstat-v.accent {{ color:{ACCENT}; }}
-.hstat-l {{ color:{FAINT}; font-size:12px; margin-top:4px; letter-spacing:0.8px;
-  text-transform:uppercase; font-weight:700; }}
-
-.badge {{ font-size:13px; font-weight:800; padding:7px 14px; border-radius:999px;
-  letter-spacing:1px; display:inline-flex; align-items:center; gap:8px; }}
-.badge.final {{ background:rgba(45,243,160,0.16); color:{ACCENT};
-  border:1px solid rgba(45,243,160,0.4); }}
-.badge.live {{ background:rgba(255,61,146,0.16); color:{MAGENTA};
-  border:1px solid rgba(255,61,146,0.4); }}
-.badge.live .dot {{ width:9px; height:9px; border-radius:50%; background:{MAGENTA};
-  box-shadow:0 0 0 4px rgba(255,61,146,0.25); }}
-
-/* ------- Cards / sections ------- */
-.card {{ background: {PANEL}; border:1px solid {STROKE}; border-radius:20px;
-  padding:24px 26px; margin-bottom:22px; box-shadow: 0 14px 40px rgba(0,0,0,0.32); }}
-.sec-head {{ display:flex; align-items:center; gap:12px; margin-bottom:18px; }}
-.sec-head h2 {{ font-size:23px; margin:0; font-weight:850; letter-spacing:-0.3px; }}
-.sec-ico {{ font-size:22px; }}
-.sec-note {{ color:{FAINT}; font-size:13px; font-weight:500; margin-left:auto; }}
-.row2 {{ display:flex; gap:22px; align-items:stretch; }}
-.row2 .half {{ flex:1; margin-bottom:22px; }}
-.chart-wrap {{ width:100%; }}
-.chart-wrap.tight {{ padding-top:4px; }}
-
-/* ------- League table ------- */
-.lt-head, .lt-row {{
-  display:grid; grid-template-columns: 58px 54px 1fr 168px 150px 92px;
-  align-items:center; gap:8px;
+.masthead-meta-left, .masthead-meta-right {{
+  font-size: 10px; letter-spacing: 0.8px; color: {MUTED};
+  text-transform: uppercase; line-height: 1.6; min-width: 200px;
 }}
-.lt-head {{ color:{FAINT}; font-size:11px; letter-spacing:1px; text-transform:uppercase;
-  font-weight:800; padding:0 14px 10px; border-bottom:1px solid {STROKE}; }}
-.lt-head > div:nth-child(4), .lt-head > div:nth-child(5) {{ }}
-.lt-row {{ padding:12px 14px; border-radius:12px; margin-top:6px;
-  background:{PANEL_2}; border:1px solid {STROKE_SOFT}; }}
-.lt-row.leader {{ background:linear-gradient(90deg, rgba(255,210,63,0.14), rgba(45,243,160,0.06) 40%, {PANEL_2});
-  border:1px solid rgba(255,210,63,0.4); }}
-.lt-rank {{ display:flex; align-items:baseline; gap:5px; }}
-.rk-num {{ font-size:22px; font-weight:900; }}
-.rk-medal {{ font-size:16px; }}
-.lt-name .nm {{ font-size:18px; font-weight:750; display:flex; align-items:center;
-  gap:8px; flex-wrap:wrap; }}
-.lt-name .tm {{ color:{FAINT}; font-size:13px; margin-top:2px; }}
-.tot-v {{ font-size:20px; font-weight:850; font-family:ui-monospace,Menlo,monospace; }}
-.tot-bar {{ height:5px; background:{STROKE_SOFT}; border-radius:3px; margin-top:5px;
-  overflow:hidden; }}
-.tot-bar span {{ display:block; height:100%; border-radius:3px;
-  background:linear-gradient(90deg,{ACCENT_DK},{ACCENT}); }}
-.gw-v {{ font-size:20px; font-weight:850; font-family:ui-monospace,Menlo,monospace;
-  color:{ACCENT}; }}
-.gw-bar {{ height:5px; background:{STROKE_SOFT}; border-radius:3px; margin-top:5px;
-  overflow:hidden; }}
-.gw-bar span {{ display:block; height:100%; border-radius:3px; background:{PURPLE}; }}
-.lt-or {{ font-size:15px; color:{MUTED}; font-family:ui-monospace,Menlo,monospace;
-  text-align:right; font-weight:600; }}
+.masthead-meta-right {{ text-align: right; }}
+.mast-kicker {{ font-weight: 700; color: {INK_2}; }}
+.masthead-title {{ text-align: center; flex: 1; }}
+.mast-name {{
+  font-size: 42px; font-weight: 900; letter-spacing: -1px; line-height: 1;
+  color: {INK};
+}}
+.mast-sub {{
+  font-size: 11px; letter-spacing: 5px; color: {MUTED}; margin-top: 3px;
+  text-transform: uppercase;
+}}
+.mast-gw {{ font-weight: 700; color: {HEADLINE}; }}
+.mast-stats {{ font-size: 10px; color: {MUTED}; }}
 
-.mv {{ font-size:13px; font-weight:800; padding:3px 8px; border-radius:8px;
-  white-space:nowrap; }}
-.mv.up {{ color:{UP}; background:rgba(45,243,160,0.13); }}
-.mv.down {{ color:{DOWN}; background:rgba(255,93,115,0.13); }}
-.mv.flat {{ color:{FLAT}; background:rgba(93,111,146,0.13); }}
+/* ---- Banner ---- */
+.banner {{ margin-bottom: 18px; }}
+.banner-rule {{ height: 2px; background: {RULE}; margin: 6px 0; }}
+.banner-headline {{
+  font-size: 34px; font-weight: 900; line-height: 1.1; color: {HEADLINE};
+  text-align: center; padding: 6px 0;
+  text-transform: uppercase; letter-spacing: -0.5px;
+}}
+.banner-deck {{
+  text-align: center; font-size: 13px; color: {INK_2}; letter-spacing: 0.3px;
+  margin-top: 4px; font-style: italic;
+}}
 
-.tag {{ font-size:11px; font-weight:800; padding:2px 8px; border-radius:7px;
-  letter-spacing:0.4px; }}
-.tag.chip {{ background:rgba(139,109,255,0.18); color:{PURPLE};
-  border:1px solid rgba(139,109,255,0.4); }}
-.tag.hit {{ background:rgba(255,93,115,0.16); color:{DOWN};
-  border:1px solid rgba(255,93,115,0.4); }}
+/* ---- Three-column layout ---- */
+.three-col {{
+  display: grid; grid-template-columns: 320px 240px 1fr;
+  gap: 0; margin-bottom: 18px;
+  border: 1px solid {RULE};
+}}
+.col-left {{ border-right: 1px solid {RULE}; padding: 16px 14px; }}
+.col-mid {{ border-right: 1px solid {RULE}; padding: 16px 14px; }}
+.col-right {{ padding: 16px 16px; }}
+.col-head {{
+  font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+  color: {MUTED}; border-bottom: 2px solid {INK}; padding-bottom: 5px; margin-bottom: 10px;
+}}
 
-/* ------- Highlights ------- */
-.hl-grid {{ display:grid; grid-template-columns: repeat(5, 1fr); gap:14px; }}
-.hl-grid.n1 {{ grid-template-columns: repeat(1, minmax(0,320px)); }}
-.hl-grid.n2 {{ grid-template-columns: repeat(2, 1fr); }}
-.hl-grid.n3 {{ grid-template-columns: repeat(3, 1fr); }}
-.hl-grid.n4 {{ grid-template-columns: repeat(4, 1fr); }}
-.hl-card {{ background:{PANEL_2}; border:1px solid {STROKE_SOFT}; border-radius:16px;
-  padding:18px 16px; position:relative; overflow:hidden;
-  border-top:3px solid var(--hlc); }}
-.hl-emoji {{ font-size:30px; }}
-.hl-kick {{ color:var(--hlc); font-weight:850; font-size:12px; letter-spacing:0.6px;
-  text-transform:uppercase; margin-top:8px; }}
-.hl-name {{ font-size:17px; font-weight:800; margin-top:6px; }}
-.hl-big {{ font-size:15px; font-weight:700; color:{TEXT}; margin-top:8px; }}
-.hl-sub {{ color:{FAINT}; font-size:12.5px; margin-top:4px; line-height:1.35; }}
+/* ---- League table ---- */
+.lt {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+.lt thead tr {{ border-bottom: 1px solid {RULE}; }}
+.lt th {{
+  font-size: 10px; letter-spacing: 0.8px; color: {MUTED}; text-transform: uppercase;
+  font-weight: 700; padding: 3px 4px; text-align: right;
+}}
+.lt th:nth-child(3) {{ text-align: left; }}
+.lt td {{ padding: 5px 4px; vertical-align: middle; border-bottom: 1px solid {RULE}; }}
+.lt tbody tr:last-child td {{ border-bottom: none; }}
+.lt-leader td {{ background: #fffbea; font-weight: 700; }}
+.lt-rk {{ font-size: 16px; font-weight: 800; text-align: center; color: {INK}; }}
+.lt-mv {{ text-align: center; }}
+.lt-nm {{ font-size: 13px; font-weight: 600; color: {INK}; }}
+.lt-tot {{ text-align: right; font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; }}
+.lt-gw {{ text-align: right; font-weight: 700; color: {HEADLINE}; font-variant-numeric: tabular-nums; }}
+.lt-chip {{
+  font-size: 9px; font-weight: 800; background: #e8e0ff; color: #4a00a0;
+  border-radius: 3px; padding: 1px 4px; vertical-align: middle; margin-left: 2px;
+}}
+.lt-hit {{
+  font-size: 9px; font-weight: 800; background: #ffe0e0; color: {HEADLINE};
+  border-radius: 3px; padding: 1px 4px; vertical-align: middle; margin-left: 2px;
+}}
+.mv-up {{ color: {UP}; font-weight: 800; font-size: 11px; }}
+.mv-dn {{ color: {DOWN}; font-weight: 800; font-size: 11px; }}
+.mv-flat {{ color: {MUTED}; font-size: 11px; }}
 
-/* ------- Manager cards ------- */
-.mc-grid-wrap {{ display:grid; grid-template-columns: 1fr 1fr; gap:18px; }}
-.mc {{ background:{PANEL_2}; border:1px solid {STROKE_SOFT}; border-radius:16px;
-  padding:18px 18px 16px; border-left:4px solid var(--mc); }}
-.mc-top {{ display:flex; align-items:center; gap:14px; }}
-.mc-rank {{ width:44px; height:44px; border-radius:12px; flex:none;
-  background:rgba(255,255,255,0.05); border:1px solid {STROKE};
-  display:flex; align-items:center; justify-content:center;
-  font-size:22px; font-weight:900; color:var(--mc); }}
-.mc-id {{ flex:1; min-width:0; }}
-.mc-name {{ font-size:19px; font-weight:800; white-space:nowrap; overflow:hidden;
-  text-overflow:ellipsis; }}
-.mc-team {{ color:{FAINT}; font-size:13px; margin-top:1px; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; }}
-.mc-gw {{ text-align:center; flex:none; }}
-.mc-gw-v {{ font-size:26px; font-weight:900; color:var(--mc);
-  font-family:ui-monospace,Menlo,monospace; line-height:1; }}
-.mc-gw-l {{ font-size:10px; color:{FAINT}; letter-spacing:1px; margin-top:3px;
-  font-weight:800; }}
-.mc-tags {{ display:flex; flex-wrap:wrap; gap:7px; margin:14px 0 4px; align-items:center; }}
-.form-badge {{ font-size:12px; font-weight:800; padding:4px 10px; border-radius:8px; }}
-.form-badge b {{ font-weight:900; }}
-.form-badge.hot {{ background:rgba(255,140,90,0.15); color:#ff8a5c;
-  border:1px solid rgba(255,140,90,0.4); }}
-.form-badge.cold {{ background:rgba(79,195,255,0.14); color:#6fd0ff;
-  border:1px solid rgba(79,195,255,0.4); }}
-.form-badge.steady {{ background:rgba(142,160,194,0.14); color:{MUTED};
-  border:1px solid {STROKE}; }}
-.mc-meta {{ font-size:12px; font-weight:700; color:{MUTED};
-  background:rgba(255,255,255,0.04); padding:4px 10px; border-radius:8px;
-  border:1px solid {STROKE_SOFT}; }}
-.mc-chip {{ font-size:12px; font-weight:800; padding:4px 10px; border-radius:8px;
-  background:rgba(139,109,255,0.18); color:{PURPLE};
-  border:1px solid rgba(139,109,255,0.4); }}
-.mc-hit {{ font-size:12px; font-weight:800; padding:4px 10px; border-radius:8px;
-  background:rgba(255,93,115,0.16); color:{DOWN};
-  border:1px solid rgba(255,93,115,0.4); }}
-.mc-mid {{ display:flex; gap:16px; margin:14px 0 6px; align-items:center; }}
-.mc-spark {{ flex:1; min-width:0; }}
-.mc-spark-hd {{ font-size:10px; color:{FAINT}; letter-spacing:1px; font-weight:800;
-  text-transform:uppercase; margin-bottom:4px; }}
-.mc-bw {{ display:flex; justify-content:space-between; margin-top:4px; font-size:12px;
-  font-weight:700; }}
-.bw-good {{ color:{ACCENT}; }}
-.bw-bad {{ color:{DOWN}; }}
-.mc-donut {{ flex:none; text-align:center; }}
-.mc-donut-key {{ margin-top:2px; }}
-.mc-donut-key span {{ display:flex; align-items:center; gap:5px; font-size:11px;
-  color:{MUTED}; font-weight:600; justify-content:flex-start; }}
-.mc-donut-key i {{ width:9px; height:9px; border-radius:3px; display:inline-block; }}
-.mc-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:6px 18px; margin-top:12px;
-  border-top:1px solid {STROKE_SOFT}; padding-top:12px; }}
-.kv {{ display:flex; justify-content:space-between; align-items:baseline; gap:8px;
-  font-size:13.5px; padding:2px 0; }}
-.kv .k {{ color:{FAINT}; font-weight:600; white-space:nowrap; }}
-.kv .v {{ font-weight:750; text-align:right; }}
-.kv .v.cap-good {{ color:{ACCENT}; }}
-.kv .v.cap-bad {{ color:{DOWN}; }}
-.mc-chips {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px;
-  border-top:1px solid {STROKE_SOFT}; padding-top:12px; }}
-.cu-lbl {{ font-size:10px; font-weight:800; color:{FAINT}; letter-spacing:1px; }}
-.cu {{ font-size:11px; font-weight:800; color:{GOLD}; background:rgba(255,210,63,0.12);
-  border:1px solid rgba(255,210,63,0.3); border-radius:7px; padding:3px 8px;
-  display:inline-flex; align-items:center; gap:4px; }}
-.cu i {{ font-style:normal; color:{FAINT}; font-weight:700; }}
+/* ---- Captain column ---- */
+.cap-list {{ display: flex; flex-direction: column; gap: 8px; }}
+.cap-row {{
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid {RULE};
+}}
+.cap-row:last-child {{ border-bottom: none; }}
+.cap-mgr {{ font-size: 12px; font-weight: 700; color: {INK}; }}
+.cap-player {{ font-size: 11px; color: {MUTED}; margin-top: 1px; }}
+.cap-pts {{ font-size: 16px; font-weight: 800; text-align: right; min-width: 44px; }}
+.cap-good {{ color: {UP}; }}
+.cap-meh {{ color: {INK_2}; }}
 
-/* ------- League Intel (captaincy / power rankings / bench / rivalries) ------- */
-.extra-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }}
-.extra-panel {{ background:{PANEL_2}; border:1px solid {STROKE_SOFT}; border-radius:12px;
-  padding:16px; }}
-.extra-panel-wide {{ grid-column:span 2; }}
-.ep-head {{ font-size:13px; font-weight:800; color:{TEXT}; letter-spacing:0.5px;
-  margin-bottom:12px; }}
-.ep-note {{ font-size:11px; color:{FAINT}; font-weight:600; margin-left:6px; }}
-/* Captaincy bar */
-.ct-row {{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }}
-.ct-name {{ font-size:13px; font-weight:700; color:{TEXT}; min-width:90px; }}
-.ct-bar-wrap {{ flex:1; background:rgba(255,255,255,0.06); border-radius:4px; height:10px;
-  overflow:hidden; }}
-.ct-bar {{ height:100%; background:linear-gradient(90deg,{ACCENT},{ACCENT_DK});
-  border-radius:4px; transition:width 0.4s; }}
-.ct-meta {{ font-size:11px; color:{MUTED}; white-space:nowrap; min-width:100px;
-  text-align:right; }}
-/* Power rankings */
-.pr-row {{ display:flex; align-items:center; gap:10px; padding:5px 0;
-  border-bottom:1px solid {STROKE_SOFT}; }}
-.pr-row:last-child {{ border-bottom:none; }}
-.pr-rank {{ font-size:12px; font-weight:800; color:{FAINT}; min-width:24px; }}
-.pr-name {{ flex:1; font-size:13px; font-weight:700; color:{TEXT}; }}
-.pr-score {{ font-size:13px; font-weight:800; color:{ACCENT}; min-width:48px;
-  text-align:right; }}
-.pr-up {{ color:{ACCENT}; font-size:12px; font-weight:800; min-width:28px;
-  text-align:right; }}
-.pr-dn {{ color:{DOWN}; font-size:12px; font-weight:800; min-width:28px;
-  text-align:right; }}
-.pr-flat {{ color:{FAINT}; font-size:12px; min-width:28px; text-align:right; }}
+/* ---- Match report ---- */
+.report-para {{
+  font-size: 14px; line-height: 1.65; color: {INK}; margin-bottom: 10px;
+  text-align: justify; hyphens: auto;
+}}
+.report-para.dropcap {{ margin-top: 4px; }}
+.drop {{
+  float: left; font-size: 52px; line-height: 0.78; font-weight: 900; color: {HEADLINE};
+  margin: 4px 6px -2px 0; font-family: Georgia, serif;
+}}
+.no-narrative {{ color: {MUTED}; font-style: italic; font-size: 13px; }}
+
+/* ---- Stats strip ---- */
+.stats-strip {{
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 0; border: 1px solid {RULE}; margin-bottom: 18px;
+}}
+.stat-box {{
+  padding: 16px 16px; border-right: 1px solid {RULE}; text-align: center;
+}}
+.stat-box:last-child {{ border-right: none; }}
+.stat-emoji {{ font-size: 24px; margin-bottom: 4px; }}
+.stat-kicker {{ font-size: 9px; letter-spacing: 1.5px; color: {MUTED}; text-transform: uppercase; font-weight: 700; }}
+.stat-name {{ font-size: 14px; font-weight: 800; color: {INK}; margin-top: 4px; }}
+.stat-value {{ font-size: 22px; font-weight: 900; color: {HEADLINE}; margin-top: 2px; }}
+.stat-sub {{ font-size: 10px; color: {MUTED}; margin-top: 2px; }}
+
+/* ---- Section header ---- */
+.np-section {{ margin-bottom: 22px; }}
+.np-section-head {{
+  display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+}}
+.np-head-rule {{ flex: 1; height: 2px; background: {RULE}; }}
+.np-head-title {{
+  font-size: 11px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase;
+  color: {INK_2}; white-space: nowrap;
+}}
+
+/* ---- Race chart ---- */
+.chart-box {{
+  border: 1px solid {RULE}; padding: 12px; background: {PAPER};
+  overflow-x: auto;
+}}
+.chart-caption {{ font-size: 10px; color: {MUTED}; text-align: center; margin-top: 6px; }}
+
+/* ---- Manager cards ---- */
+.mc-grid {{
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}}
+.mc {{
+  border: 1px solid {RULE}; border-top: 3px solid; background: {PAPER};
+  padding: 12px 12px 10px;
+}}
+.mc-top {{ display: flex; align-items: center; gap: 10px; }}
+.mc-rank {{ font-size: 24px; font-weight: 900; }}
+.mc-id {{ flex: 1; min-width: 0; }}
+.mc-name {{ font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.mc-team {{ font-size: 10px; color: {MUTED}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.mc-gwv {{ font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }}
+.mc-tags {{ display: flex; gap: 5px; flex-wrap: wrap; margin: 6px 0 4px; font-size: 10px; }}
+.mc-chip {{
+  background: #e8e0ff; color: #4a00a0; border-radius: 3px;
+  padding: 1px 5px; font-weight: 800;
+}}
+.mc-hit {{
+  background: #ffe0e0; color: {HEADLINE}; border-radius: 3px;
+  padding: 1px 5px; font-weight: 800;
+}}
+.mc-spark {{ margin: 4px 0; }}
+.mc-stats {{ margin-top: 6px; border-top: 1px solid {RULE}; padding-top: 6px; display: flex; flex-direction: column; gap: 3px; }}
+.mcs {{ display: flex; justify-content: space-between; font-size: 11px; }}
+.mcs-k {{ color: {MUTED}; }}
+.mcs-v {{ font-weight: 700; text-align: right; }}
+.cap-good {{ color: {UP}; }}
+.cap-bad {{ color: {DOWN}; }}
+.cap-meh {{ color: {INK_2}; }}
+
+/* ---- Intel section ---- */
+.intel-grid {{
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 0; border: 1px solid {RULE};
+}}
+.intel-panel {{ padding: 14px 14px; border-right: 1px solid {RULE}; }}
+.intel-panel:last-child {{ border-right: none; }}
+.intel-panel-head {{
+  font-size: 10px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+  color: {INK_2}; border-bottom: 1px solid {RULE}; padding-bottom: 6px; margin-bottom: 10px;
+}}
+.intel-note {{ font-weight: 500; color: {MUTED}; letter-spacing: 0; }}
+.intel-row {{
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid {RULE}; font-size: 12px;
+}}
+.intel-row:last-child {{ border-bottom: none; }}
+.intel-rank {{ font-weight: 800; color: {MUTED}; min-width: 24px; }}
+.intel-name {{ flex: 1; font-weight: 600; }}
+.intel-val {{ font-weight: 800; color: {HEADLINE}; min-width: 36px; text-align: right; }}
+/* Captaincy bars */
+.ct-row {{ display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 12px; }}
+.ct-row:last-child {{ margin-bottom: 0; }}
+.ct-name {{ font-weight: 600; min-width: 90px; }}
+.ct-bar-wrap {{ flex: 1; background: {RULE}; border-radius: 2px; height: 8px; overflow: hidden; }}
+.ct-bar {{ height: 100%; background: {HEADLINE}; border-radius: 2px; }}
+.ct-meta {{ font-size: 10px; color: {MUTED}; white-space: nowrap; min-width: 70px; text-align: right; }}
 /* Rivalries */
-.rv-grid {{ display:flex; flex-direction:column; gap:8px; }}
-.rv-item {{ display:flex; align-items:center; gap:12px; padding:6px 0;
-  border-bottom:1px solid {STROKE_SOFT}; }}
-.rv-item:last-child {{ border-bottom:none; }}
-.rv-a {{ font-size:13px; font-weight:700; color:{TEXT}; flex:1; }}
-.rv-gap {{ font-size:12px; font-weight:800; color:{GOLD}; background:rgba(255,210,63,0.12);
-  border:1px solid rgba(255,210,63,0.3); border-radius:6px; padding:2px 8px;
-  white-space:nowrap; }}
-.rv-b {{ font-size:13px; font-weight:600; color:{MUTED}; flex:1; text-align:right; }}
+.rv-row {{
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid {RULE}; font-size: 12px;
+}}
+.rv-row:last-child {{ border-bottom: none; }}
+.rv-a {{ font-weight: 700; flex: 1; }}
+.rv-gap {{
+  font-size: 10px; font-weight: 800; background: #fffbea; border: 1px solid {ACCENT};
+  border-radius: 3px; padding: 1px 5px; white-space: nowrap; color: {ACCENT};
+}}
+.rv-b {{ font-size: 11px; color: {MUTED}; flex: 1; text-align: right; }}
 
-/* ------- Pundit ------- */
-.pundit {{ background:
-  linear-gradient(135deg, rgba(139,109,255,0.10), rgba(45,243,160,0.05)), {PANEL}; }}
-.pundit-body {{ position:relative; padding-left:8px; }}
-.quote-mark {{ position:absolute; top:-32px; left:-4px; font-size:90px; color:{PURPLE};
-  opacity:0.28; font-family:Georgia,serif; line-height:1; }}
-.pundit-body p {{ font-size:16.5px; line-height:1.62; color:#dfe7f6; margin:0 0 12px;
-  font-weight:450; }}
-.pundit-body p:first-of-type {{ font-size:18px; font-weight:600; color:{TEXT}; }}
-
-/* ------- Footer ------- */
-.footer {{ display:flex; justify-content:space-between; align-items:center;
-  color:{FAINT}; font-size:13px; padding:18px 8px 0; border-top:1px solid {STROKE_SOFT};
-  margin-top:6px; }}
-.foot-mono {{ font-family:ui-monospace,Menlo,monospace; }}
+/* ---- Footer ---- */
+.np-footer {{ margin-top: 20px; }}
+.footer-rule {{ height: 3px; background: {INK}; margin-bottom: 2px; }}
+.footer-inner {{
+  display: flex; justify-content: space-between; font-size: 10px;
+  color: {MUTED}; padding: 4px 0; letter-spacing: 0.5px;
+}}
+.footer-right {{ text-align: right; }}
 """
